@@ -1,0 +1,133 @@
+kubernetes(k8s) is a orcasteration tool,
+CNCF cloud native computing foundation help to develop such open source by providing resources.
+
+monolithic vs micro-services
+
+one service fails all fails, in micro it doesnt effect other also the cost is lower then monolithic.
+can use docker for each service and to manage those service or container then we can manage it with k8s.
+
+node - server
+multinode = cluster(more then one server)
+we have to manage cluster in k8s.
+
+kubernetes architecture:
+1 master node and one worker node.
+master node is headquater send work to worker node.
+worker node runs the docker containers, and they are managed at master node.
+master node contains services:
+    api server : keeps the track of work happining at worker node as well as master node.(like a team lead) 
+        a communication gateway between components. meaning direct communication wont work in case need to contact the cluster can be done with api server.
+    like Hiring manager we have a service called scheduler which scheduler the container at worker node
+        it work is to scheduler container or pods. pods are the unit inside it containers are running.
+    etcs: is the database in k8s which keep the track or scheduler task(key value pair) keep stored data of k8s in etcd.
+    like project manager we have a controller manager who check everthing is working(node, pod, cluster,services)
+
+worker node services:
+    kublet is another manager who works at worker node level.check pods working or not and tells the api server and he updated the scheduler ,etcd and controller manager.
+    well the pods are not accessable its actally isolated, well to access the pod outside user so the need of service proxy is there.
+        with the help of service proxy it talk to api server and he later talks to kubelet and then we can access the pod.
+
+all these nodes and masters nodes located away communication with each other with CNI network(container network interface) eg. weav Net, Calico, etc.
+kubectl talk to api server and keep the track of entire k8s cluster, 
+
+
+way to create cluster:
+    kubeadm: we get two or more ec2 and insall the kubeadm and connect them together in cluster.
+    minikube(local/ec2):
+    KIND Cluster: kubernetes in Docker this is full form, running k8s in docker.
+    EKS/AKS/GKE: service provider managers the cluster.  
+setup on AWS:
+    connect with pem key on terminal.
+
+
+    # ----------------------------
+# 2. Install Kind (based on architecture)
+# ----------------------------
+if ! command -v kind &>/dev/null; then
+  echo "📦 Installing Kind..."
+
+  ARCH=$(uname -m)
+  if [ "$ARCH" = "x86_64" ]; then
+    curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-amd64
+  elif [ "$ARCH" = "aarch64" ]; then
+    curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.29.0/kind-linux-arm64
+  else
+    echo "❌ Unsupported architecture: $ARCH"
+    exit 1
+  fi
+
+  chmod +x ./kind
+  sudo mv ./kind /usr/local/bin/kind
+  echo "✅ Kind installed successfully."
+else
+  echo "✅ Kind is already installed."
+fi
+
+# ----------------------------
+# 3. Install kubectl (based on architecture)
+# ----------------------------
+if ! command -v kubectl &>/dev/null; then
+  echo "📦 Installing kubectl (latest stable version)..."
+
+  ARCH=$(uname -m)
+  VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+
+  if [ "$ARCH" = "x86_64" ]; then
+    curl -Lo ./kubectl "https://dl.k8s.io/release/${VERSION}/bin/linux/amd64/kubectl"
+  elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    curl -Lo ./kubectl "https://dl.k8s.io/release/${VERSION}/bin/linux/arm64/kubectl"
+  else
+    echo "❌ Unsupported architecture: $ARCH"
+    exit 1
+  fi
+
+  chmod +x ./kubectl
+  sudo mv ./kubectl /usr/local/bin/kubectl
+  echo "✅ kubectl installed successfully."
+else
+  echo "✅ kubectl is already installed."
+fi
+
+
+sudo apt-get install docker.io
+
+
+docker ps 
+sudo user
+this will return persmission error
+so:
+    sudo usermod -aG docker $USER && newgrp docker
+now docker will work.
+kubectl version
+docker --version
+kind --version
+
+
+now the installation is done, lets do the configuration:
+this is a yaml file:
+this is a key pair thing but we can kay a key  before : and valude next after the :
+also we can have a list in that claude with "-" and content of values and this goes vertically below with return button.
+make a folder of kind-cluster with mkdir enter the folder.
+now write config.yam
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: tws-cluster
+
+nodes:
+- role: control-plane
+  image: kindest/node:v1.35.0
+  extraPortMappings:
+    - containerPort: 30080
+      hostPort: 8080
+      protocol: TCP
+
+- role: worker
+  image: kindest/node:v1.35.0
+
+- role: worker
+  image: kindest/node:v1.35.0
+
+kind create cluster --name tws-cluster --config=config.yml
+
+now lets see minikube:
