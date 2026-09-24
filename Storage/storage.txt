@@ -1,0 +1,91 @@
+here we have been running pods because we want to have self-healing and scalable systems,
+well to achieve that we use deployment strategies.
+
+not user interact with a container with an app or service, in case of deletion of pod my tend to lose the data so we need storage to make it persistant.
+so we persist the data with host.
+so we need pc and pvc persistant volumene and persistant volume claim
+
+lets make a persistant volume
+vim persistantVolume.yml
+
+kind: PersistentVolume 
+apiVersion: v1 
+metadata:
+    name: local-pv 
+    namespace: nginx            ##error below we talked
+    labels:
+        app: local
+spec:
+    capacity:
+        storage: 1Gi 
+    accessModes:
+        - ReadWriteOnce
+    persistentVolumeReclaimPolicy: Retain 
+    storageClassName: local-storage 
+    hostPath:
+        path: /mnt/data
+
+kubectl apply -f persistantVolume.yml
+kubectl get pv
+
+now the volume is created need to claim.
+
+to do that:
+    vim persistantvolumeclaim.yml
+
+kind: PersistentVolumeClaim 
+apiVersion: v1 
+metadata:
+    name: local-pvc
+    namespace: nginx            ##error below we talked
+spec:
+    accessModes:
+        - ReadWriteOnce 
+    resources:
+        requests:
+            storage: 1Gi
+    storageClassName: local-storage
+
+kubectl apply -f persistantvolumeclaim.yml
+
+check with this not it wont be avaible rather it will be bound as status with below command:
+    kubectl get pv
+
+to check more details about bound with deatils do:
+    kubectl get pvc
+
+now we will give the claim to the pod
+
+with this we have pv and pvc, pv means from host we got 1gb on space with the path,
+pvc means we have clamed it and its in bound.
+
+not we have to make changes in our deployment featuring volume mounting from container volume to local host storage which is our pv and pvc.
+with configs
+changes done:
+volumeMounts:
+- mountPath: /var/www/html 
+  name: my-volume
+volumes:
+- name: my-volume 
+  persistentVolumeClaim: 
+    claimName: local-pvc
+
+
+when ever we have issue with pods status saying pending always check it with command:
+kubectl describe pod/podname -n nginx 
+we got an error with missing namespace  in noth pv and pvc yaml files(##error we talked)
+
+once we add those namespaces we delete the pvc and pv with:
+    kubectl delete pvc/pvcname
+    and
+    kubectl delete pv/pvname
+
+now we apply the pv and pvc again with:
+    kubectl apply -f persistantVolume.yml
+    and 
+    kubectl apply -f persistantvolumeclaim.yml
+
+not this contain namespaces
+done
+
+not check pods we see it running.

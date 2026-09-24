@@ -358,3 +358,137 @@ scale deployment:
   kubectl scale deployment/nginx-deployment -n nginx --replicas=5
   this creates 5 pods
 
+all these replicaset and statefulSet works the Replicas, but deployment does the rolling update.
+kubectl get pods -n nginx -o wide
+  this gives wide info
+
+so the rolling update is something which is like to avoid downtime which is done with having said there are 5 pods already and we are changing the version then it will not change all 5 pods rather it will chance few pods so the traffic shift without downtime.
+and slowely all pods is changes
+below is the example we are running pods of nginx with nginx namespace so we will do version change.
+
+command :
+  kubectl set image deployment/nginx-deployment -n nginx nginx=nginx:1.27.3
+
+check it is working with:
+  kubectl get pods -n nginx
+
+it state with few of then are running and new some says containercreating
+
+this is creating pods and creating replicas of it and rolling updates.
+
+
+topic: replicaset
+
+lets delete the deployment file we created with command:
+  kubectl delete -f deplayment.yml
+
+replicaset file is exactly like the deployment file but with few changes which are:
+   kind : ReplicaSet
+   name: nginx-replicasets
+  
+to apply the replicaset file run command:
+  kubectl apply -f replacaset.yml
+now the replicaset is created
+
+kubectl get replicaset -n nginx
+
+replica uses the same technology which deplayment uses but deployment is little advance.
+this does not provide us rolling update.
+
+we will talking about the statefulsets later when learning storage now lets talk about the DaemoSets.
+
+what daemonset does is that it makesure that at each node there must be one pod running.
+
+all this deletion we were doing like above we did deployment deletion , now i ran kubectl delete -f replaset.yml this all is done in the nodes.
+
+lets create a daemonset.yml
+  vim daemonset.yml
+
+or do:
+  cp replicaset.yml daemonset.yml
+and make some name changes and there is not replicas in specs 
+
+now save and run:
+  kubectl apply daemonset.yml
+
+and check it with:
+  kubectl get pods -n nginx 
+  and
+  kubectl get pods -n nginx -o wide
+
+topics:
+  lets do jobs and cron jobs:
+jon is nothing but telling to complete a given or configured task done and job finished.
+it can be backup, patching or 
+
+kind: Job
+apiVersion: batch/v1
+metadata:
+  name: demo-job 
+  namespace: nginx
+spec:
+  completions: 1
+  parallelism: 1 
+  template:
+    metadata:
+      name: demo-job-pod 
+      labels:
+        app: batch-task
+    spec:
+      containers:
+        - name: batch-container 
+          image: busybox:latest 
+          command:["sh", "-c" ,"echo Hello Dosto! && sleep 10"]
+        restartPolicy: Never
+
+applyit with :
+  kubectl apply -f job.yml
+
+check job with:
+  kubectl get job -n nginx
+
+check pods with:
+  kubectl get pods -n nginx
+
+it goes from pod created then running task then comepeted and then terminating atlast completed.
+
+see the log of that pod with:
+  kubectl logs pod/demo-job-asdsa -n nginx
+
+delete the job
+
+if you want a perticular job must run on schedule then the job is called cron job.
+it follows a perticular schedule
+
+create cron with:
+vim cron.yml
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox:1.28
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+
+write config and save
+
+and apply
+
+check pods , log, cron and delete
+
+
+
+

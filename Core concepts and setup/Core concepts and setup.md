@@ -430,4 +430,131 @@ kubectl apply -f deployment.yml
 
 # Scale pods up/down
 kubectl scale deployment/nginx-deployment -n nginx --replicas=5
+
+# Wide output (shows which node each pod is on)
+kubectl get pods -n nginx -o wide
+```
+
+---
+
+### Rolling Updates
+
+Deployments support **rolling updates** — pods are updated one at a time to avoid downtime. Traffic continues flowing to old pods while new ones spin up.
+
+```bash
+# Update nginx image version
+kubectl set image deployment/nginx-deployment -n nginx nginx=nginx:1.27.3
+
+# Watch pods update one by one
+kubectl get pods -n nginx
+```
+
+Pods will cycle through: `Running` → `ContainerCreating` (new) → `Running` (new) → old pods terminate.
+
+---
+
+## 9. ReplicaSet
+
+ReplicaSet works like a Deployment but **without rolling updates**. Rarely used directly — Deployments are preferred.
+
+`replicaset.yml` — same as deployment YAML but:
+- `kind: ReplicaSet`
+- `name: nginx-replicaset`
+
+```bash
+kubectl apply -f replicaset.yml
+kubectl get replicaset -n nginx
+kubectl delete -f replicaset.yml
+```
+
+---
+
+## 10. DaemonSet
+
+A **DaemonSet** ensures exactly **one pod runs on every node** in the cluster. Useful for logging agents, monitoring, etc.
+
+`daemonset.yml` — same as ReplicaSet but:
+- `kind: DaemonSet`
+- Remove the `replicas` field from `spec`
+
+```bash
+kubectl apply -f daemonset.yml
+kubectl get pods -n nginx
+kubectl get pods -n nginx -o wide   # confirm one pod per node
+```
+
+---
+
+## 11. Jobs & CronJobs
+
+### Job
+
+A **Job** runs a task to completion (e.g., backup, batch processing) and then stops.
+
+`job.yml`
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job
+  namespace: nginx
+spec:
+  completions: 1
+  parallelism: 1
+  template:
+    metadata:
+      name: demo-job-pod
+      labels:
+        app: batch-task
+    spec:
+      containers:
+        - name: batch-container
+          image: busybox:latest
+          command: ["sh", "-c", "echo Hello! && sleep 10"]
+      restartPolicy: Never
+```
+
+```bash
+kubectl apply -f job.yml
+kubectl get job -n nginx
+kubectl get pods -n nginx        # pod goes: Running → Completed → Terminating
+kubectl logs pod/<job-pod-name> -n nginx
+kubectl delete -f job.yml
+```
+
+---
+
+### CronJob
+
+A **CronJob** runs a Job on a schedule (like Linux cron).
+
+`cron.yml`
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "* * * * *"   # every minute
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: hello
+              image: busybox:1.28
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+```
+
+```bash
+kubectl apply -f cron.yml
+kubectl get cronjob
+kubectl get pods
+kubectl logs pod/<cron-pod-name>
+kubectl delete -f cron.yml
 ```
