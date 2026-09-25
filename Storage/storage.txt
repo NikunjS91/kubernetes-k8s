@@ -89,3 +89,87 @@ not this contain namespaces
 done
 
 not check pods we see it running.
+
+
+now that the pods are running how do we see them?
+
+the pod has deployment to make it accessable for external user, which can be done via service proxy.
+need to create service resource with this it helps to redirect to multiple deployment.
+
+lets create one service:
+    vim service.yml
+
+kind: service
+apiversion : v1
+metadata:
+    name: nginx-service
+    namespace: nginx
+spec:
+    selector:
+        app:nginx
+    ports:
+        -protocol:TCP
+        port:80
+            targetPort:80
+    type: ClusterIP
+
+kubectl apply -f service.yml
+
+to see all pods , deployment and service in one command:
+    kubectl getall -n nginx
+
+not we have to access the service on our browser which was our question before.
+befor that we need to expose our docker containers ip and port forwarding with can be done with this commands:
+    kubectl port-forward service/nginx-service -n nginx 80:80 --address=0.0.0.0
+
+    after running this command over ec2 it may show an error that persmission required which wont be the case in local system.
+    we can bypass that with the sudo -E this gives is a environmant
+
+    command:
+        sudo -E kubectl port-forward service/nginx-service -n nginx 80:80 --address=0.0.0.0 
+    this will run if not then check for another port maybe that port is already in use
+
+    after that on aws open port 80 in ec2 security group for traffic inbound and we are good to go, put in the url ip address of the ec2 machine and the port number with : and you may see out nginx welcome page ther.
+
+
+now the app can be seen over the internet, now lets think of we have multiple app where we can use route in url to go a specific application.
+eg. 12.161.181.168/nginx for nginx and /app for any other app.
+this can be done with ingree it is a trafiic re-routing.
+
+this is like managing the service.
+    if we think of a microsevice like namespace,pods, deployment and service this is a sequence workflow,
+    lets talk about the ingress to manage the service.
+    
+while we do that both ther services must be in a single namespace.
+so we delete the setup of kubectl for that namespace we had incase of another app.
+we need two services or more in one name space with different deployment and pods.
+ 
+so we have services of both app check it with this:
+    kubectl get svc -n nginx            // in this case we have used two services in one nginx namespace.
+
+we have a open source nginx-ingress 
+he install that in our ec2 with its owe command find over github.
+it will run its job and load balancer once done.
+this uses its own namespace
+
+now lets make a ingress.yml in our project direcotry where we had our deplayment.yml all.
+    vim ingress.yml
+
+save the config file and apple with kubectl
+
+to get ingress infor run this command:
+    kubectl get ing -n nginx
+
+
+this is a ingress-nginx controller we have installed on kind cluster.
+since all otherthings are ready ,now we need to expose it.
+
+sudo -E kubectl port-forward service/ingress-nginx-controller -n ingress-ngainx 8080:80 --address=0.0.0.0
+    and then open port of 8080 for ingress-controller
+
+now that app will open on ec2 ip with 8080 port but the this is both the app uses / as home route and the port in url goes is hidden.
+
+so either one app is showing but in background both are working, so we use annotation to fix that:
+
+what is annotation?
+    
