@@ -1,0 +1,138 @@
+now that the pods are running how do we see them?
+
+the pod has deployment to make it accessable for external user, which can be done via service proxy.
+need to create service resource with this it helps to redirect to multiple deployment.
+
+lets create one service:
+    vim service.yml
+
+kind: service
+apiversion : v1
+metadata:
+    name: nginx-service
+    namespace: nginx
+spec:
+    selector:
+        app:nginx
+    ports:
+        -protocol:TCP
+        port:80
+            targetPort:80
+    type: ClusterIP
+
+kubectl apply -f service.yml
+
+to see all pods , deployment and service in one command:
+    kubectl getall -n nginx
+
+not we have to access the service on our browser which was our question before.
+befor that we need to expose our docker containers ip and port forwarding with can be done with this commands:
+    kubectl port-forward service/nginx-service -n nginx 80:80 --address=0.0.0.0
+
+    after running this command over ec2 it may show an error that persmission required which wont be the case in local system.
+    we can bypass that with the sudo -E this gives is a environmant
+
+    command:
+        sudo -E kubectl port-forward service/nginx-service -n nginx 80:80 --address=0.0.0.0 
+    this will run if not then check for another port maybe that port is already in use
+
+    after that on aws open port 80 in ec2 security group for traffic inbound and we are good to go, put in the url ip address of the ec2 machine and the port number with : and you may see out nginx welcome page ther.
+
+
+now the app can be seen over the internet, now lets think of we have multiple app where we can use route in url to go a specific application.
+eg. 12.161.181.168/nginx for nginx and /app for any other app.
+this can be done with ingree it is a trafiic re-routing.
+
+this is like managing the service.
+    if we think of a microsevice like namespace,pods, deployment and service this is a sequence workflow,
+    lets talk about the ingress to manage the service.
+    
+while we do that both ther services must be in a single namespace.
+so we delete the setup of kubectl for that namespace we had incase of another app.
+we need two services or more in one name space with different deployment and pods.
+ 
+so we have services of both app check it with this:
+    kubectl get svc -n nginx            // in this case we have used two services in one nginx namespace.
+
+we have a open source nginx-ingress 
+he install that in our ec2 with its owe command find over github.
+it will run its job and load balancer once done.
+this uses its own namespace
+
+now lets make a ingress.yml in our project direcotry where we had our deplayment.yml all.
+    vim ingress.yml
+
+save the config file and apple with kubectl
+
+to get ingress infor run this command:
+    kubectl get ing -n nginx
+
+
+this is a ingress-nginx controller we have installed on kind cluster.
+since all otherthings are ready ,now we need to expose it.
+
+sudo -E kubectl port-forward service/ingress-nginx-controller -n ingress-ngainx 8080:80 --address=0.0.0.0
+    and then open port of 8080 for ingress-controller
+
+now that app will open on ec2 ip with 8080 port but the this is both the app uses / as home route and the port in url goes is hidden.
+
+so either one app is showing but in background both are working, so we use annotation to fix that:
+
+what is annotation?
+
+    there is slight change in ingress file adding the annotation there and we are good.
+    i refer red the kuberneter document for this.
+
+configMaps:
+    with this it gives the ability to send varibale and data to the pods securly.
+
+lets start with StateFullState.
+
+so like we had before apps like django does not need state but databases are associated with it like mongodb or mysql they had state are its required.
+while the appmlike django and flask can use deployment, replicaset and daemonSets for it but for the databases like mysql and mongodb we need to have states so we use StateFullSets.
+    like suppose we have 5 replicas each contains its own state and number.
+    so incase of one pod delets and another comes , then it will have the same number and same data as well as state meaning its persistant.
+
+we are using mysql image here.
+same files setup:
+    vim statefullset.yml
+    in this file put file configs then put container setup , persistant volume, pvc and done refer the document.
+
+save it
+
+now service needed so:
+    vim service.yml
+    here we wont have clusterIP casue its an headless server.
+    now apply the service and statefullset with kubectl and maker sure use templet keyword not templets this is a common mistake.
+    
+
+check pods and we are good to go.
+tip: to check the pods status every 2 sec then use command:
+    watch kubectl get pods -n mysql
+
+everything is running check it with bash while going inside the pod with kubectl exec -it pods-name -n namespace --bash
+mysql -u root -p
+put passwords and show database;
+    you can see your database there because we defined it in our statefullset.yml
+
+
+you can delete the pod but samename and same number pod will be created back.
+
+now lets learn the config maps.
+
+as we had the database config in our statefullset lets suppose we want to chnage the name then we have enter StateFullset and change the value.
+i want better approach
+
+so we have a config-map which help to keep file data seperate and we can map them in statefullset.yml file
+
+so we creata a config-map.yml file with vim and define the config and then we make map it in out StateFullSets and reapply both with kubectl.
+
+also we can encrypt the data with secret
+but we have to encrypt the passwords actually and put it there inside the secret file.
+like:
+    echo "Nikunj112233" | base64
+    this will return a value copy and paste this.
+
+alter ther StateFullSets.yml with the database passwords changes. then apply the secret and re-apply the statefullset.yml and we are good
+applying secret will creata pods from start.
+password is not exposed anymore.
