@@ -1,0 +1,84 @@
+Resource Quotas:
+
+this can be explained better with a ec2 having 4gb ram and suddenly traffic enters and full ram is occopied by one pod then it will be hard to another service pod to function without memory avaible.
+to put limit on resources is what we are going to learn.
+
+so here we put resources inside the deployment.yml meaning that this will request some size of cpu and memeory and what will be the max limit this will have with size 
+    meaning atleast size to atmost size.
+
+while we can scale pods so we dont stuck the node.
+
+resources:
+    requests:
+        cpu: 100m
+        memeory:128mi
+    limit:
+        cpu:200m
+        memeory:256mi
+
+
+apply deployment then see the pods then desctibe the pods 
+
+Probes:
+probes are of three types:
+    liveness probe
+    readiness probe
+    startup probe
+
+probe is a request weather the pod is working appropately or not.
+to make sure the pod is running fine or not with the help of port calling , once the pod is created it will send a internal request to the port , this determines weather the pod is live or dead.
+from create to ready is check with readiness probe, while start of pod at that time startup probe is used to verify the pod started
+
+implement:
+    livenessProbe:
+        httpGet:
+            path: /
+            port: 8000
+
+readinessProbe:
+        httpGet:
+            path: /
+            port: 8000
+
+apply servce if not, the deployemnt and check pods.
+
+use desctibe to see 
+kubectl describe pod podname -n nginx
+
+Taints/ Tolerations:
+
+
+when we tell the cluster kubectl apply deployment,
+    api server tells the scheduler tp schedule a pod then schedular decide on which node to schedule the pod,
+
+now the taint is telling you k8s cluster not to schedule a pod to a specific node.(we can decide on which node not to deploy the pod telling schedular)
+and tolerance is in case of a tints node still we want to schedule a pod then we use tolerance
+
+implement:
+    taint:
+    
+    get all nodes:
+        kubectl get nodes
+
+    taint a node:
+        kubectl taint node node-name prod=true:NoSchedule
+
+    apply a pod
+    incase of all nodes if we tainted then it will not schedule pod showing pending status
+    can be check with describe commaand:
+        kubectl describe pod/pod-name -n nginx
+    
+    to remove the taint :
+     kubectl taint node node-name prod=true:NoSchedule-
+
+     tolerance:
+     open your pods file in the spec add:
+        tolerations:
+            - key: "prod"
+            operator: "equal"
+            value: "true"
+            effect :"NoSchedule"
+
+        
+    save exit.
+    now even if the node is tainted still it can be schedule a pod, on node tained matching prod="true"
