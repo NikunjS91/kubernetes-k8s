@@ -100,3 +100,104 @@ tolerations:
 ```
 
 With this toleration, the pod can be scheduled on nodes tainted with `prod=true:NoSchedule`.
+
+---
+
+## 4. HPA & VPA (Autoscaling)
+
+| Type | Full Name | What it does | Use case |
+|---|---|---|---|
+| **HPA** | Horizontal Pod Autoscaler | Increases/decreases **number of pods** | Stateless apps (nginx, apache) |
+| **VPA** | Vertical Pod Autoscaler | Increases/decreases **CPU/memory** per pod | Stateful apps (MySQL) |
+
+**KEDA** (Kubernetes Event Driven Autoscaling) — selects HPA or VPA based on metrics or external events (queue depth, CPU, etc.).
+
+---
+
+### Metrics Server
+
+Required for HPA/VPA to read CPU and memory usage:
+
+```bash
+kubectl top node              # node-level metrics
+kubectl top pod -n <namespace>  # pod-level metrics
+```
+
+If `metrics API not available`, the metrics-server is not installed — check `kube-system` and install it (refer to docs for EC2-specific flags).
+
+---
+
+### HPA Example (Apache)
+
+**Setup namespace, deployment, and service:**
+```bash
+kubectl get all -n apache
+```
+
+**Port forward to test locally:**
+```bash
+sudo -E kubectl port-forward service/apache-service -n apache 82:80 --address=0.0.0.0
+```
+
+Add EC2 inbound rule for the port, then access via `<ec2-ip>:82`.
+
+**DNS access within cluster:**
+```
+http://apache-service.apache.svc.cluster.local
+```
+
+---
+
+**`hpa.yml`**
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: apache-hpa
+  namespace: apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: apache-deployment
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 5
+```
+
+```bash
+kubectl apply -f hpa.yml
+kubectl get hpa -n apache
+```
+
+**Generate load to trigger scaling:**
+```bash
+kubectl run -i --tty load-generator --image=busybox -n apache -- /bin/sh
+# Inside the pod:
+while true; do wget -q -O- http://apache-service.apache.svc.cluster.local; done
+```
+
+---
+
+### VPA Example (Apache)
+
+```bash
+# Clone the autoscaler repo and run the install commands from docs
+# Then create vpa.yml, apply namespace/deployment/service
+kubectl get vpa -n apache
+kubectl top pod -n apache
+```
+
+---
+
+## 5. Node Affinity
+
+Node affinity lets you constrain which nodes a pod can be scheduled on — for example, scheduling only on nodes in a specific region or datacenter.
+
+Used when you need **fine-grained control** over pod placement beyond simple taints/tolerations.

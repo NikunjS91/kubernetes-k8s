@@ -82,3 +82,112 @@ implement:
         
     save exit.
     now even if the node is tainted still it can be schedule a pod, on node tained matching prod="true"
+
+
+HPA and VPA:
+
+this is called horizontal pod autoscaling and verticel pod autoscaling.
+
+this autoscaling is basically the used to handle traffic loads, and it heppends with resource useage threshold.
+HPA is increasing pod numbers and vpa is like adding resource or computing power so it can handle better load.
+
+VPA is used in StateFull(mysql)
+
+
+
+and KEDA (kubernetes event driven autoscaling)
+
+keda selects HPA or VPA based on the nature of matrix or events,
+matrics is usage of cpu or memory kind of resources.
+
+
+to know the matrics use command:
+    kibectl top node
+    if this returns matricx API not avaible then, check if kube-system has matrics server
+    and this server tell everything happing on node or cpu.
+
+that matrics must be instralled whith command,
+for ec2 if its not installing then there must be secure commands need to be placed refer documents.
+    
+you can check at pod level too:
+    kubectl top pod (can add namespace to if what to check it the filter)
+
+now we will see apache for HPA:
+
+apache is is another server which helps to deploy apps.
+
+create namespace, deplayment and apply those and check the pods is running.
+
+to make it publicaly avaible then we need service.yml
+apply ther service
+
+and check :
+    kubectl get all -n apache
+
+
+we can also access the service inside the pod with dns:
+    http://apache-service.apache.svc.cluster.local(comming lecture later)
+
+port forwarding:
+    kubectl port-forward service/apache-service -n apache 82:80 --address=0.0.0.0
+    or add sudo -E kubectl port-forward service/apache-service -n apache 82:80 --address=0.0.0.0
+
+not add inbound security port for traffic are we are good.
+check with ec2 ip /port and we can access it.
+
+in case of heavy traffic the cluster might stop functioning,
+
+
+not the setup is ready now we need to create a HPA.yml
+apiversion: autoscaling/v2
+kind: horizontolPodAutoscaler
+matadata:
+    name: apache-happing
+    namespace: apache
+spec:
+    scaleTargetRef:
+        kind:deployment
+        name: apache-deployment
+        apiversion: apps/v1
+    
+    minReplicas:1
+    maxReplicas:5
+
+    metrics:
+        - type:Resource
+          resource:
+            name:cpu
+            target:
+                type: Utilization
+                averageUtilization: 5
+                 
+
+save and done.
+apple and check with:
+    kubectl apply -f apache
+now how to add laod?
+google :  online stress generator url
+either this above or we can create our own.
+
+kubectl run -i --ty load-generator --image=busybox -n apache /bin/sh
+
+while true; do wget -q -O- http://apache-service.apache.svc.cluster.local; done
+
+ 
+VPA:
+
+git clone the autoscaling repo on github
+and run those given commands.
+
+make vpa.yml
+
+make apply service and deployment with namespaces,
+
+then add traffic to the app and check the kubectl get vpa -n apache
+kubectl top pod -n apache
+
+
+node affinity:
+
+this is use to define a set of instruction if that matche the pod will schedule on those condition satisfaction only.
+lets say a region specific server or datacenter the pod will be schedule only there.
