@@ -23,6 +23,38 @@ resources:
     memory: 256Mi
 ```
 
+**Full deployment example with resource limits (`deployment.yml`):**
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+```
+
 ```bash
 kubectl apply -f deployment.yml
 kubectl get pods -n nginx
@@ -48,11 +80,43 @@ livenessProbe:
   httpGet:
     path: /
     port: 8000
+  initialDelaySeconds: 10   # wait 10s before first check (let app start)
+  periodSeconds: 5          # check every 5s
+  failureThreshold: 3       # restart pod after 3 consecutive failures
 
 readinessProbe:
   httpGet:
     path: /
     port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 8000
+  failureThreshold: 30      # allow up to 30 * periodSeconds for slow starts
+  periodSeconds: 10
+```
+
+**Alternative probe types:**
+
+```yaml
+# TCP socket probe — useful for non-HTTP services (e.g. databases)
+livenessProbe:
+  tcpSocket:
+    port: 3306
+  initialDelaySeconds: 15
+  periodSeconds: 10
+
+# Exec probe — runs a command inside the container
+livenessProbe:
+  exec:
+    command:
+      - cat
+      - /tmp/healthy
+  initialDelaySeconds: 5
+  periodSeconds: 5
 ```
 
 ```bash
@@ -187,10 +251,39 @@ while true; do wget -q -O- http://apache-service.apache.svc.cluster.local; done
 
 ### VPA Example (Apache)
 
+**`vpa.yml`**
+```yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: apache-vpa
+  namespace: apache
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: apache-deployment
+  updatePolicy:
+    updateMode: "Auto"   # Auto = VPA can evict and recreate pods with new resources
+  resourcePolicy:
+    containerPolicies:
+      - containerName: apache
+        minAllowed:
+          cpu: 50m
+          memory: 64Mi
+        maxAllowed:
+          cpu: 500m
+          memory: 512Mi
+```
+
+> `updateMode` options: `Off` (recommendations only), `Initial` (apply on pod creation), `Auto` (evict and recreate).
+
 ```bash
 # Clone the autoscaler repo and run the install commands from docs
 # Then create vpa.yml, apply namespace/deployment/service
+kubectl apply -f vpa.yml
 kubectl get vpa -n apache
+kubectl describe vpa apache-vpa -n apache   # shows recommended CPU/memory values
 kubectl top pod -n apache
 ```
 
@@ -201,3 +294,79 @@ kubectl top pod -n apache
 Node affinity lets you constrain which nodes a pod can be scheduled on — for example, scheduling only on nodes in a specific region or datacenter.
 
 Used when you need **fine-grained control** over pod placement beyond simple taints/tolerations.
+
+| Rule Type | Behavior |
+|---|---|
+| `requiredDuringSchedulingIgnoredDuringExecution` | Hard rule — pod will not schedule if no node matches |
+| `preferredDuringSchedulingIgnoredDuringExecution` | Soft rule — scheduler prefers matching nodes but won't block scheduling |
+
+**Step 1 — Label the node:**
+```bash
+kubectl label node <node-name> region=us-east
+kubectl get nodes --show-labels   # verify the label
+```
+
+**Step 2 — Add node affinity to your deployment (`deployment.yml`):**
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: region
+                    operator: In
+                    values:
+                      - us-east
+      containers:
+        - name: nginx
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+```
+
+**Soft preference example (prefers `us-east`, falls back to any node):**
+
+```yaml
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 80          # higher weight = stronger preference (1–100)
+        preference:
+          matchExpressions:
+            - key: region
+              operator: In
+              values:
+                - us-east
+```
+
+```bash
+kubectl apply -f deployment.yml
+kubectl get pods -n nginx -o wide   # NODE column shows which node each pod landed on
+kubectl describe pod/<pod-name> -n nginx   # check "Node-Selectors" and "Tolerations"
+```
+
+**Operator options for `matchExpressions`:**
+
+| Operator | Meaning |
+|---|---|
+| `In` | Label value is in the list |
+| `NotIn` | Label value is NOT in the list |
+| `Exists` | Label key exists (any value) |
+| `DoesNotExist` | Label key does not exist |
+| `Gt` / `Lt` | Label value is greater/less than (numeric strings) |
