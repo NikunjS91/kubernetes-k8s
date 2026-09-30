@@ -4,14 +4,19 @@
 
 ## 1. Resource Quotas
 
-Without resource limits, a single pod can consume all memory on a node, starving other pods. Setting **requests** and **limits** ensures fair resource allocation.
+Without resource limits, a single pod can consume all memory on a node, starving other pods.
+Setting **requests** and **limits** ensures fair resource allocation across pods.
 
 | Field | Meaning |
 |---|---|
 | `requests` | Minimum guaranteed resources the pod needs to be scheduled |
 | `limits` | Maximum resources the pod is allowed to consume |
 
-Add to your deployment YAML under `spec.template.spec.containers`:
+---
+
+### Configuration
+
+Add under `spec.template.spec.containers` in your deployment:
 
 ```yaml
 resources:
@@ -23,7 +28,9 @@ resources:
     memory: 256Mi
 ```
 
-**Full deployment example with resource limits (`deployment.yml`):**
+---
+
+### Full Example — `deployment.yml`
 
 ```yaml
 apiVersion: apps/v1
@@ -55,10 +62,19 @@ spec:
               memory: 256Mi
 ```
 
+---
+
+### Commands
+
 ```bash
+# Apply the deployment
 kubectl apply -f deployment.yml
+
+# List pods
 kubectl get pods -n nginx
-kubectl describe pod/<pod-name> -n nginx   # verify resource fields
+
+# Verify resource fields are set correctly
+kubectl describe pod/<pod-name> -n nginx
 ```
 
 ---
@@ -73,16 +89,27 @@ Probes let Kubernetes check whether a pod is healthy at different stages of its 
 | **Readiness Probe** | From startup → ready | Checks if the pod is ready to receive traffic |
 | **Liveness Probe** | Continuously after ready | Checks if the pod is still alive; restarts it if not |
 
-Add to your deployment YAML under `spec.template.spec.containers`:
+Probe timing fields:
+
+| Field | Meaning |
+|---|---|
+| `initialDelaySeconds` | How long to wait before running the first check |
+| `periodSeconds` | How often to run the check |
+| `failureThreshold` | How many consecutive failures before taking action |
+
+---
+
+### Configuration — HTTP Probes
+
+Add under `spec.template.spec.containers` in your deployment:
 
 ```yaml
-livenessProbe:
+startupProbe:
   httpGet:
-    path: /
+    path: /healthz
     port: 8000
-  initialDelaySeconds: 10   # wait 10s before first check (let app start)
-  periodSeconds: 5          # check every 5s
-  failureThreshold: 3       # restart pod after 3 consecutive failures
+  failureThreshold: 30    # allow up to 30 × periodSeconds for slow starts
+  periodSeconds: 10
 
 readinessProbe:
   httpGet:
@@ -91,25 +118,32 @@ readinessProbe:
   initialDelaySeconds: 5
   periodSeconds: 5
 
-startupProbe:
+livenessProbe:
   httpGet:
-    path: /healthz
+    path: /
     port: 8000
-  failureThreshold: 30      # allow up to 30 * periodSeconds for slow starts
-  periodSeconds: 10
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  failureThreshold: 3     # restart pod after 3 consecutive failures
 ```
 
-**Alternative probe types:**
+---
+
+### Configuration — TCP & Exec Probes
+
+Use **TCP** for non-HTTP services (e.g. databases):
 
 ```yaml
-# TCP socket probe — useful for non-HTTP services (e.g. databases)
 livenessProbe:
   tcpSocket:
     port: 3306
   initialDelaySeconds: 15
   periodSeconds: 10
+```
 
-# Exec probe — runs a command inside the container
+Use **Exec** to run a command inside the container:
+
+```yaml
 livenessProbe:
   exec:
     command:
@@ -119,41 +153,61 @@ livenessProbe:
   periodSeconds: 5
 ```
 
+---
+
+### Commands
+
 ```bash
+# Apply the deployment
 kubectl apply -f deployment.yml
+
+# List pods
 kubectl get pods -n nginx
-kubectl describe pod/<pod-name> -n nginx   # check probe status under "Conditions"
+
+# Check probe status under the "Conditions" section
+kubectl describe pod/<pod-name> -n nginx
 ```
 
 ---
 
 ## 3. Taints & Tolerations
 
-### Taints
+### Concept
 
-A **taint** tells the scheduler **not** to place pods on a specific node — unless the pod explicitly tolerates it.
+A **taint** marks a node so the scheduler avoids placing pods on it.
+A **toleration** on a pod explicitly permits it to run on a tainted node.
+
+Together they let you reserve nodes for specific workloads (e.g. GPU nodes, prod-only nodes).
+
+| Taint Effect | Behaviour |
+|---|---|
+| `NoSchedule` | New pods are not scheduled unless they tolerate the taint |
+| `PreferNoSchedule` | Scheduler avoids the node but may still place pods there |
+| `NoExecute` | Evicts existing pods that don't tolerate the taint |
+
+---
+
+### Taint Commands
 
 ```bash
 # List all nodes
 kubectl get nodes
 
-# Taint a node (NoSchedule = don't schedule new pods here)
+# Add a taint — pods without a matching toleration will stay Pending
 kubectl taint node <node-name> prod=true:NoSchedule
 
-# Apply a deployment — pods will stay Pending if all nodes are tainted
-kubectl describe pod/<pod-name> -n nginx   # shows scheduling failure reason
+# Verify — "0/1 nodes available" means all nodes are tainted
+kubectl describe pod/<pod-name> -n nginx
 
-# Remove the taint
+# Remove the taint (trailing dash removes it)
 kubectl taint node <node-name> prod=true:NoSchedule-
 ```
 
 ---
 
-### Tolerations
+### Configuration — Tolerations
 
-A **toleration** on a pod allows it to be scheduled onto a tainted node.
-
-Add to your pod/deployment YAML under `spec.template.spec`:
+Add under `spec.template.spec` in your deployment:
 
 ```yaml
 tolerations:
@@ -163,56 +217,73 @@ tolerations:
     effect: "NoSchedule"
 ```
 
-With this toleration, the pod can be scheduled on nodes tainted with `prod=true:NoSchedule`.
+With this toleration the pod can be scheduled on any node tainted with `prod=true:NoSchedule`.
+
+---
+
+### Commands
+
+```bash
+# Apply the deployment with tolerations
+kubectl apply -f deployment.yml
+
+# Confirm the pod is now scheduled (no longer Pending)
+kubectl get pods -n nginx -o wide
+```
 
 ---
 
 ## 4. HPA & VPA (Autoscaling)
 
-| Type | Full Name | What it does | Use case |
+| Type | Full Name | Scales | Best for |
 |---|---|---|---|
-| **HPA** | Horizontal Pod Autoscaler | Increases/decreases **number of pods** | Stateless apps (nginx, apache) |
-| **VPA** | Vertical Pod Autoscaler | Increases/decreases **CPU/memory** per pod | Stateful apps (MySQL) |
+| **HPA** | Horizontal Pod Autoscaler | Number of pod replicas | Stateless apps (nginx, apache) |
+| **VPA** | Vertical Pod Autoscaler | CPU / memory per pod | Stateful apps (MySQL) |
 
-**KEDA** (Kubernetes Event Driven Autoscaling) — selects HPA or VPA based on metrics or external events (queue depth, CPU, etc.).
+**KEDA** (Kubernetes Event-Driven Autoscaling) extends HPA to support external event sources like queue depth, Kafka topics, or custom metrics.
 
 ---
 
 ### Metrics Server
 
-Required for HPA/VPA to read CPU and memory usage:
+HPA and VPA both require metrics-server to be running in the cluster.
 
 ```bash
-kubectl top node              # node-level metrics
-kubectl top pod -n <namespace>  # pod-level metrics
+# Check if metrics are available
+kubectl top node
+kubectl top pod -n <namespace>
 ```
 
-If `metrics API not available`, the metrics-server is not installed — check `kube-system` and install it (refer to docs for EC2-specific flags).
+If you see `metrics API not available`, metrics-server is not installed.
+Install it (for EC2 add `--kubelet-insecure-tls` flag) and wait ~60s for data to populate.
 
 ---
 
-### HPA Example (Apache)
+### HPA Example — Apache
 
-**Setup namespace, deployment, and service:**
+#### Explanation
+
+HPA watches CPU utilization and scales the number of pod replicas between `minReplicas` and `maxReplicas`.
+When average CPU across all pods exceeds `averageUtilization`, new replicas are added.
+
+---
+
+#### Setup
+
 ```bash
+# Verify namespace, deployment, and service are running
 kubectl get all -n apache
-```
 
-**Port forward to test locally:**
-```bash
+# Port-forward the service to test from your machine
 sudo -E kubectl port-forward service/apache-service -n apache 82:80 --address=0.0.0.0
-```
-
-Add EC2 inbound rule for the port, then access via `<ec2-ip>:82`.
-
-**DNS access within cluster:**
-```
-http://apache-service.apache.svc.cluster.local
+# Access via: <ec2-ip>:82
+# Cluster-internal DNS: http://apache-service.apache.svc.cluster.local
 ```
 
 ---
 
-**`hpa.yml`**
+#### Configuration — `hpa.yml`
+
 ```yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -232,26 +303,48 @@ spec:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: 5
-```
-
-```bash
-kubectl apply -f hpa.yml
-kubectl get hpa -n apache
-```
-
-**Generate load to trigger scaling:**
-```bash
-kubectl run -i --tty load-generator --image=busybox -n apache -- /bin/sh
-# Inside the pod:
-while true; do wget -q -O- http://apache-service.apache.svc.cluster.local; done
+          averageUtilization: 50    # scale up when average CPU > 50%
 ```
 
 ---
 
-### VPA Example (Apache)
+#### Commands
 
-**`vpa.yml`**
+```bash
+# Apply the HPA
+kubectl apply -f hpa.yml
+
+# Watch the HPA status (TARGETS shows current vs desired utilization)
+kubectl get hpa -n apache
+```
+
+---
+
+#### Generate Load to Trigger Scaling
+
+```bash
+# Spin up a busybox pod and run a load loop
+kubectl run -i --tty load-generator --image=busybox -n apache -- /bin/sh
+
+# Inside the pod:
+while true; do wget -q -O- http://apache-service.apache.svc.cluster.local; done
+```
+
+Watch replicas increase with `kubectl get hpa -n apache` in another terminal.
+
+---
+
+### VPA Example — Apache
+
+#### Explanation
+
+VPA monitors actual CPU/memory usage and recommends (or automatically applies) updated resource requests/limits per pod.
+Unlike HPA it does not add more pods — it resizes existing ones.
+
+---
+
+#### Configuration — `vpa.yml`
+
 ```yaml
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -264,7 +357,7 @@ spec:
     kind: Deployment
     name: apache-deployment
   updatePolicy:
-    updateMode: "Auto"   # Auto = VPA can evict and recreate pods with new resources
+    updateMode: "Auto"      # evict and recreate pods with updated resource values
   resourcePolicy:
     containerPolicies:
       - containerName: apache
@@ -276,14 +369,27 @@ spec:
           memory: 512Mi
 ```
 
-> `updateMode` options: `Off` (recommendations only), `Initial` (apply on pod creation), `Auto` (evict and recreate).
+`updateMode` options:
+
+| Mode | Behaviour |
+|---|---|
+| `Off` | Only generate recommendations, apply nothing |
+| `Initial` | Apply recommendations only at pod creation |
+| `Auto` | Evict and recreate pods with new resource values |
+
+---
+
+#### Commands
 
 ```bash
-# Clone the autoscaler repo and run the install commands from docs
-# Then create vpa.yml, apply namespace/deployment/service
+# Install VPA (clone autoscaler repo and run install script first)
 kubectl apply -f vpa.yml
+
+# Check VPA object and its current recommendations
 kubectl get vpa -n apache
-kubectl describe vpa apache-vpa -n apache   # shows recommended CPU/memory values
+kubectl describe vpa apache-vpa -n apache
+
+# Monitor actual pod resource usage
 kubectl top pod -n apache
 ```
 
@@ -291,22 +397,68 @@ kubectl top pod -n apache
 
 ## 5. Node Affinity
 
-Node affinity lets you constrain which nodes a pod can be scheduled on — for example, scheduling only on nodes in a specific region or datacenter.
+Node affinity constrains which nodes a pod can be scheduled on using node labels.
+Use it when you need placement control beyond taints/tolerations — e.g. schedule only on nodes in `us-east`, or prefer GPU nodes.
 
-Used when you need **fine-grained control** over pod placement beyond simple taints/tolerations.
-
-| Rule Type | Behavior |
+| Rule Type | Behaviour |
 |---|---|
-| `requiredDuringSchedulingIgnoredDuringExecution` | Hard rule — pod will not schedule if no node matches |
-| `preferredDuringSchedulingIgnoredDuringExecution` | Soft rule — scheduler prefers matching nodes but won't block scheduling |
+| `requiredDuringSchedulingIgnoredDuringExecution` | Hard rule — pod stays Pending if no node matches |
+| `preferredDuringSchedulingIgnoredDuringExecution` | Soft rule — scheduler prefers matching nodes but won't block |
 
-**Step 1 — Label the node:**
+---
+
+### Step 1 — Label the Node
+
 ```bash
+# Add a label to the target node
 kubectl label node <node-name> region=us-east
-kubectl get nodes --show-labels   # verify the label
+
+# Verify the label was applied
+kubectl get nodes --show-labels
 ```
 
-**Step 2 — Add node affinity to your deployment (`deployment.yml`):**
+---
+
+### Step 2 — Configuration — Hard Rule (`required`)
+
+Add under `spec.template.spec` in your deployment:
+
+```yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: region
+              operator: In
+              values:
+                - us-east
+```
+
+Pod will **not** schedule unless a node has `region=us-east`.
+
+---
+
+### Step 3 — Configuration — Soft Rule (`preferred`)
+
+```yaml
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 80          # 1–100; higher = stronger preference
+        preference:
+          matchExpressions:
+            - key: region
+              operator: In
+              values:
+                - us-east
+```
+
+Pod **prefers** `us-east` nodes but falls back to any available node.
+
+---
+
+### Full Example — `deployment.yml`
 
 ```yaml
 apiVersion: apps/v1
@@ -340,33 +492,29 @@ spec:
             - containerPort: 80
 ```
 
-**Soft preference example (prefers `us-east`, falls back to any node):**
+---
 
-```yaml
-affinity:
-  nodeAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 80          # higher weight = stronger preference (1–100)
-        preference:
-          matchExpressions:
-            - key: region
-              operator: In
-              values:
-                - us-east
-```
+### Commands
 
 ```bash
+# Apply the deployment
 kubectl apply -f deployment.yml
-kubectl get pods -n nginx -o wide   # NODE column shows which node each pod landed on
-kubectl describe pod/<pod-name> -n nginx   # check "Node-Selectors" and "Tolerations"
+
+# NODE column confirms which node each pod was placed on
+kubectl get pods -n nginx -o wide
+
+# Check "Node-Selectors" and affinity details
+kubectl describe pod/<pod-name> -n nginx
 ```
 
-**Operator options for `matchExpressions`:**
+---
+
+### Operator Reference
 
 | Operator | Meaning |
 |---|---|
-| `In` | Label value is in the list |
-| `NotIn` | Label value is NOT in the list |
+| `In` | Label value is in the provided list |
+| `NotIn` | Label value is NOT in the provided list |
 | `Exists` | Label key exists (any value) |
 | `DoesNotExist` | Label key does not exist |
-| `Gt` / `Lt` | Label value is greater/less than (numeric strings) |
+| `Gt` / `Lt` | Label value is greater / less than (numeric strings) |
