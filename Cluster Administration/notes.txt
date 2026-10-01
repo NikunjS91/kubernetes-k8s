@@ -1,0 +1,97 @@
+RBAC( role based access control):
+    all the resources of k8s like pods, deployment , statefullset,service to these does the user has access or not for that the role have been created,
+
+to learn the RBAC we need to learn two thinks service account and users,
+service account can be a manager and administrator
+service account can be at namespace but the user are generally at cluster level.
+and the roles are there like can i get the service, update it,delete it and all there are the roles and to assign these role to a service account we need role binding.
+like wise on user side there is cluster roles and to bit it there is cluster role binding,
+
+RBAC is basically how much access we want to give to a user or service account and keep a control over access.
+it can be achieved with two types one with namespace level putting all together resources in one namespace or at cluster level
+
+now we will see service account through namespace:
+
+tip:
+kubectl -f . : this command deletes all the resource at once.
+
+kubectl auth whoami : see the current user
+
+kubectl auth can-i get pods : this command gives the answer meaning a user is authorised to do any perticulaer task, yes or no.
+
+
+apply namespace , deplayment.
+
+now that as admin role we can do everthing we have full access but in case we hired an intern and he ran the delete command then everything will crash.
+so we need role.yml
+
+so vim role.yml
+
+save and apply role.
+
+kubectl get role -n apache
+now we have role we can bind it but we need a service account to bind it.
+
+vim service-account.yml
+
+save and apply
+
+kubectl get serviceaccount -n apache
+
+
+now we have the service account.
+to check it without binding it run command:
+    kubectk auth can-i get pods -n apache --as=apache-user
+
+so lets create a binding:
+    vim role-binding.yml
+
+
+save and apply.
+
+kube ctl get rolebinding -n apache
+now role and service account is binded.
+
+kubectl auth can-i get pods --as=apache-user -n apache
+
+this was the role base access control with service account.
+now 
+
+when we need to do monitering, loging then we need cluster role and cluster binding.
+
+there the use case of the RBAC changes before we was using it on namespace level not at cluster level this is a huge horizon.
+meaning a user created at cluster level, collect the log of whole cluster, work on whole cluster pods and same with deployment
+
+now we will have a dashboard to see all happing in cluster.
+
+lets setup dashboard:
+
+apply dasboard manifest files:
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.ø/aio/deploy/recommended.yaml
+
+lets make a dashboard-admin-user
+
+so vim dashboard-admin-user.yml
+
+in this file we are defining cluster-role-binding below the ---,meaning above the --- there is cluster-user and below is binding.
+
+how to get the clusterrole to put inside the binding deatils:
+    kubectl get clusterole -n kubernetes-dashboard
+
+not save and apply.
+
+not to make it work we need to run proxy but before that we need to get the access token first.
+    kubectl -n kubernetes-dashboard create token admin-user
+
+for the above created admin-user we will create a token, so it can assess our dashboard.
+and run:
+    kubectl proxy --port=8001 --address=0.0.0.0 --accept-hosts='.*'
+
+
+and go to :
+
+http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
+and past the token there and signin.
+
+tip: kubectl proxy & : this help to keep the command running in the background
+
