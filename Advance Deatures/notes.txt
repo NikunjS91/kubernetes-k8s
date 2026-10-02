@@ -1,0 +1,55 @@
+now that we have learned so much many things its very hard to make all these yml manifest files.
+starting from writing kind , templet and what all.
+to make it easy, keep the struggle of writing a manifest and for all environmant make files seperately,whole is packeged
+this can be achieved with helm an package manager
+
+like we install anything through the terminal with code gudo apt-get install unzip
+same like help to install all manifest files.
+
+Helm:
+this is used when we have to make three seperaete nodes with different application.
+like suppose we have nginx,mysql and notes app.
+for that each we have to create all k8s resources so this helm helps us there with packing it with package manager and he will install it
+this is a packege manager which help applications and workload to manage ,deploy and update and so on.
+
+how to use it?
+
+first install helm:
+
+find the instll over helm offical site.
+helm create apache-helm
+
+just one command and files are created
+
+might see and folder cd into it and do : tree
+
+tip: tree is a external pacage which show whole directory in good visual manner.
+
+since thats a templet and we dont need to do any anything juist fill the values.yml and we are ready.
+
+now once all is ready just do:
+    helm package .
+
+package is created (can be import or exported)
+
+now we need to create one dev environmant the one prod and staging environmant on same package, and name it as well.
+
+helm install dev-apache apcahe-helm
+
+to remove the helm chart then we can do:
+    helm uninstall dev-apache
+
+one problem is that it uses default namespace.
+to solve this define the namespace in command:
+    helm install dev-apache apache-helm -n dev-apache --create-namespace 
+
+first save the value.yml then make its packge:
+    helm package apache-helm
+
+any change made in values.yml and now need to run it with helm then:
+    helm upgrade prd-apache ./apache-helm -n prd-apache 
+
+rollback in helm:
+    helm rollback prd-apache 1 -n prd-apache
+
+

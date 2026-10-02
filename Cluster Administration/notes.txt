@@ -92,6 +92,49 @@ and go to :
 
 http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
 and past the token there and signin.
-
+ 
 tip: kubectl proxy & : this help to keep the command running in the background
 
+
+
+Custom Resource Defination(CRDs):
+    here the resources we know are the pods, deployment ,services and etc.
+    there are all already known to k8s.
+but how does it knows what is it and what is its structure?
+    when we need to make such resources which doesnt exist pre-defined in k8s then we have to make them for own purpose then we make it through custom respource defination.
+example: someone might have made pod meaning the structure need to have a spec then container then image.
+
+like wise this CRDs help to create our own.
+
+like pods have their apiversion as v1 and ther deplayment have as apps/v1
+this apps is the group name, and the v1 is the version of that resource
+so the pod have v1 meaning it dont have group name so its bank and v1 is the pods resource version.
+
+mkdir crd
+
+cd crd
+
+vim devops-crd.yml
+
+so now the is created but how will k8s know that this is a custom resouce and this has custom resource structure.
+simple: juse use kind as CustomResourceDefination
+and api version is going to be apiextension.k8s.io/v1
+
+
+not the file is written and saved
+
+not we need to apply it.
+
+kubectl apply -f devops-crd.yml
+
+and check it with :
+    kubectl get crd
+
+now out custom resource is ready.
+
+now by using it we can create resources.
+
+same with vim filename.yml
+then use the deatils we defined in the above file and make the new file and we have to save and then apply.
+
+kubectl describe <shortname> <crname>
