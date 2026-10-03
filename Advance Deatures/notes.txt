@@ -53,3 +53,47 @@ rollback in helm:
     helm rollback prd-apache 1 -n prd-apache
 
 
+helm repo list: see all repos there.
+
+
+helm life cycle
+
+
+init container vs side car container:
+    these two topic comes under pods
+    in both there is main container, what main container is, it is a container which is the first container,
+and the init container is before creating the main container any path needed or folder needed , to initialize it this init container is used.
+in short before running main container it checks for the respouces needed to run main container.
+
+example: creating a folder is a need for xyz app and in that we store something.
+so first the init container runs and create the folder then main container runs save the files in that folder.
+
+
+what is sidecar container?
+    one manifest again and in spec it will run two containers, one with main app, second for collecting logs or something.
+    this is running two things parallel.
+    also know as helper container.
+
+in init container manifest file the kind is always pod, we will creater container inside the pods.
+
+make a manifest file for vim initcontainer.ymal
+save and apply and check the pod with:
+    kubectl get pods
+
+and as we see the pods now go in pod's container which is main container with:
+    kubectl logs <pod_name> -c <container_name> -c <another_container_name>
+
+
+now sidecars contianers(two thing side by side):
+    vim sidecar-container.yml
+
+
+save and apply.
+
+check pods:
+    kubectl get pods
+get logs:
+    kubectl logs sidecar-test -c main-container -c sidecar-containers
+
+
+
