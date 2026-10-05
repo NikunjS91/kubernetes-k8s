@@ -1,0 +1,86 @@
+this is a chat application on k8s, this is a 3 tier application:
+    front end: ReactJS
+    backend: nodejs
+    db: mongodb
+
+firt we will need container for each micro service then we need pods for it followed by the depoyment and service, to all there need to talk to each other so we need ingress.
+this project will be on minikube (local)
+and we will use vscode for text changes and file management.
+if installed before then run:
+    minikube start --driver=docker
+
+else:
+    curl -LO https://github.com/kubernetes/minikube/releases/latest/download/minikube-darwin-arm64
+    
+    sudo install minikube-darwin-arm64 /usr/local/bin/minikube
+    and run minikube start --driver=docker      (docker must be instlled and running)
+
+
+now find the source code repo and clone it in your direcotry.
+
+now we need a docker image to make a pods.
+so login to dockerhub and login and generate token come to terminal on local and login here and put the given password too.
+    returns login succeeded
+
+cd into backend and then:
+    docker build -t username/project-name-backend:latest .
+    everything inside the backend folder will be in the image now.(image will be ready)
+
+check it with:
+    docker images
+
+push it:
+    docker push usernmae/project-name-backend:latest
+    image will be pushed to dockerhub.
+
+simiarly do same with front end.
+
+note: dockerfile is needed for all these.
+if not then make it and configure it.
+
+to changes the image tag:
+    docker image tag <old_tag> <new_tag> 
+    then
+    docker image push
+
+to get the docker image of mongo:
+    docker pull mongo
+
+create name space with kind as namespace,apiversion as v1 and in metadata name: chat-app
+and run kubectl create -f namespace.yml
+
+check it with kubectl get ns
+
+not we creted deploymet to all three, frontend, backend and mongodb with pv and pvc(mongodb)
+
+time to apply:
+    follow the sequence:
+        kubectl apply -f mongodb-pv.yml
+        check:
+            kubectl get pv -n chat-application 
+    now apply pvc:
+        kubectl apply -f mongodb-pvc.yml
+        check:
+            kubectl get pv -n chat-application
+    apply mongodb deployement:
+        kubectl apply -f mongodb-deplayment.yml
+    check:
+        kubectl get pods -n chat-application
+    apply backend too
+
+
+not we encountered an error meaning the backed service is needed to make frontend work.
+front end uses the nginx reverse proxy server which has path /api/backend   thats casuing as the need of backend service.
+
+so applying service:
+    kubectl apply -f backed-service.yml
+do same with front end too.
+
+now our front end is on port: 80
+and backend is on port: 5001
+
+another error: we deployed the pod but we forgot to add the mongodb uri in env of deployement.
+    this was because in our deplayment the mongodb config is missing.
+
+another error: we define the secret.yml and put the password randomly so we need to use base64 encoder for it.
+

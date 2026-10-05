@@ -1,0 +1,4 @@
+# Minikube binaries
+minikube-darwin-arm64
+minikube-linux-amd64
+minikube-windows-amd64.exe
