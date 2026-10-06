@@ -18,12 +18,12 @@ spec:
         backend:
           service:
             name: frontend
-            port: 
+            port:
               number: 80
       - pathType: Prefix
         path: "/api"
         backend:
           service:
             name: backend
-            port: 
+            port:
               number: 5001

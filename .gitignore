@@ -2,3 +2,6 @@
 minikube-darwin-arm64
 minikube-linux-amd64
 minikube-windows-amd64.exe
+
+# macOS
+.DS_Store

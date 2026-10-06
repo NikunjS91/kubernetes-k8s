@@ -84,3 +84,9 @@ another error: we deployed the pod but we forgot to add the mongodb uri in env o
 
 another error: we define the secret.yml and put the password randomly so we need to use base64 encoder for it.
 
+now we have ingress setuped.
+but another error we had because of minikube we need to setup it too so:
+    minikube addons enable ingree
+
+lsof -i:80:
+    with this we can get id of running port

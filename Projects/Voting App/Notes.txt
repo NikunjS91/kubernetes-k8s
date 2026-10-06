@@ -1,0 +1,126 @@
+as we all know that this is a project we have already done.
+we have already created service and deployment for redis,result,vote and worker.
+so now we know all how to apply to k8s cluster so now we will move on to theminitoring and obervebality.
+
+lets understand that.
+
+what is observability?
+    observability is based on three main principles.
+    matrics , log and traces.
+        matrics : used for monitoring
+        logs : logging
+        traces: Tracing job
+    
+    with matrics it tells us:
+        what is happining in the server:
+            cpu usage, ram usage, network and etc.
+    
+    with logs it tells us:
+        why it is happining?
+            reasoning. tells us logs , error lines
+    
+    with tracing it tells us:
+        how it happened?
+            how did we reached this situation.
+    tools used:
+        metrics:
+            we use tools like prometheus which gives us the metrics (cpu usage, ram)
+            to show this matrics somewhere we use grafana, it can be also seen on datadogs, powerbi, kibana
+                place where dashboard where made we can put our matrics there.
+
+        Loging:
+            well to capture logs we need tools like loki,promtail
+
+        for tracing:
+            jaeger
+            opentelemetry 
+    
+the aim is to k8s cluster containing the app how do we monitor it.
+
+to export matrics of a node then we need to use a service called: nodeexporter
+
+what it does:
+    take the information form node and used port 9100 and /export it.(cpu, ram, network )
+
+while the apiserver is minitoring the entire cluster, what does the api server contain that data will be exported.
+    the master node keeps a perticular namespace(kube-system) this is a namespace where the etcd, apiserver,schedular,controller manager all these services are running init.
+    even these all services needs to be monitored.
+
+this is 360degree monitoring of a k8s cluster,this can be done with another service kube-state-metrics
+    this keep a check on all the compunents inside the cluster the core components are the working as intended or not.
+
+so now we understand monitoring is not about the node-exporter or docker containers, rather this wraps around the whole cluster including the core components.
+
+now all these data of monitoring would go to prometheus.
+    this allows us to scrape data
+
+prometheus is a timeseries database that has ability to scrape data, query(query server (promQL)),graph, data store.
+all this data then goes to visualization tools like grafana.the data store above is the data source of grafana.
+
+
+we now create cluster with anything we are confortable with:
+    KIND,MiniKube etc.
+
+now on that cluster there are n number of things running we need to do monitoring.
+
+now we have installed helm and KIND using the official document:
+whenever we do any work in k8s we do it in isolated group. called namespaces.
+
+now we going to create another namespace monitoring:
+    kubectl create namespace monitering
+
+now we need to add the promethois community in helm chart:
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+
+check that with:
+    helm repo list
+
+now that the repo is setuped, all the chars are the in the repo now we need that to be in the cluster as well so:
+    helm repo update
+
+now need to install prometheus-stack from prometheus-community and i want perticular stack which is : kube-prometheus-stack
+and set their nodeports for both grafana and premetheus and defining the service type also:
+helm install prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  --set prometheus.service.type=NodePort \
+  --set prometheus.service.nodePort=30000 \
+  --set grafana.service.type=NodePort \
+  --set grafana.service.nodePort=31000
+
+  NAME: prometheus-stack
+LAST DEPLOYED: Tue Oct  6 15:37:09 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=prometheus-stack"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=prometheus-stack" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+  kubectl port-forward svc/prometheus-stack-kube-prom-prometheus 9090:9090 -n monitoring --address=0.0.0.0
+
+  now the prometheus can be seen over client:
+    in prometheus we need to maintain a file prometheus.yml in which we have to put the scraping configurations.
+    because we are using helm some configurations are already there checl it with the client /healthtarget
+
+kubectl port-forward svc/prometheus-stack-grafana 3000:80 -n monitoring --address=0.0.0.0
+
+not grafana and prometheus is up on client.
+but now we dont know the password:
+    due to security reasons of pods password can be different:
+        now lets get password from pods
+        :   kubectl get secret prometheus-stack-grafana -n monitoring -o jsonpath="{.data.admin-password}"
