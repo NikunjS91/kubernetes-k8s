@@ -1,0 +1,55 @@
+this project is going to be with eks cluster(elastic kubernetes service) on aws.
+in this eks, the schedular , etcd controller evertything is managed by aws we dont need to think about it.
+we just need to setup the cluster and deploy it.
+
+now we have kind and minikube on our terminal , how to create a eks cluster here?
+
+we can create it with gui at aws but its not preferable, while we will using aws cli.
+
+lets setup that:
+    first we need a unzip tool in out system:
+        sudo apt-get install unzip
+    setup aws in out local machine.
+        curl -fsSL https://awscli.amazonaws.com/v2/install.sh | bash
+    
+
+run command:
+    aws configure
+    : now we will need aws access key id.
+        now we have to create an user at iam named eks-user
+            giver permissions: either select needed eks permissions or do adminaccess.
+            click on the user and go in security cerdentials and make access keys.
+            put the access key id and secret key and hit enter if needed region up to you.
+    if we do:
+        aws s3 ls:
+            this will show you what all buckets we have on s3.
+    meaning now out aws cli is woking at best.
+
+
+now lets make cluster:
+    brew install aws/tap/eksctl
+
+    create cluster:
+        eksctl create cluster --name=tws-cluster --region=us-east-1 --version=latest --without-nodegroup
+
+    eksctl utils associate-iam-oidc-provider --region us-east-1 --cluster tws-cluster --approve
+  : connects our master machine with other machines(cloud)
+
+  make a node group:
+    meaning this contans either one node or more than one nodes:
+        eksctl create nodegroup --cluster=tws-cluster 
+                     --region=us-east-1 \
+                     --name=tws-cluster-ng \
+                     --node-type=t2.medium \
+                     --nodes=2 \
+                     --nodes-min=2 \
+                     --nodes-max=2 \
+                     --node-volume-size=20 \
+                     --ssh-access \
+                     --ssh-public-key=eks-nodegroup-key 
+
+    eksctl make cluster using cloud formation.
+
+check it with:
+    kubectl get nodes
+
