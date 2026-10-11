@@ -43,6 +43,54 @@ apache-helm/
 
 > **How it works:** Templates use Go templating syntax (`{{ .Values.replicaCount }}`). Helm substitutes values from `values.yaml` at install time. You only edit `values.yaml` — not the templates.
 
+### What `values.yaml` Looks Like
+
+This is the only file you typically change. Everything else is wired to these values via `{{ .Values.* }}` in the templates.
+
+```yaml
+# values.yaml
+replicaCount: 2
+
+image:
+  repository: nginx
+  tag: "1.25"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+ingress:
+  enabled: true
+  host: myapp.example.com
+```
+
+For a **dev** environment you might override with fewer replicas and a debug image tag, for **prod** you use more replicas and a pinned release tag — all from the same chart.
+
+### Preview Rendered Manifests (Without Installing)
+
+Before applying, use `helm template` to see exactly what YAML Helm will generate. This is great for debugging or CI validation.
+
+```bash
+helm template dev-apache ./apache-helm -n dev-apache
+# Prints all rendered YAML to stdout — no cluster interaction needed
+```
+
+### Lint a Chart
+
+```bash
+helm lint ./apache-helm
+# Checks for syntax errors and common mistakes before you install
+```
+
 ### Package a Chart
 
 ```bash
@@ -59,6 +107,9 @@ helm install dev-apache apache-helm
 
 # Install into a specific namespace (creates it if it doesn't exist)
 helm install dev-apache apache-helm -n dev-apache --create-namespace
+
+# Override specific values at install time (without editing values.yaml)
+helm install dev-apache apache-helm -n dev-apache --set replicaCount=1 --set image.tag=latest
 
 # Install prod environment from the same chart
 helm install prd-apache apache-helm -n prd-apache --create-namespace
@@ -79,6 +130,8 @@ helm rollback prd-apache 1 -n prd-apache
 helm history prd-apache -n prd-apache
 ```
 
+> **Why rollback matters:** If you upgrade and your app starts crashing, `helm rollback` restores the previous exact state — Deployment, ConfigMap, Service — in one command. Much safer than manually reverting YAML files.
+
 ### Useful Helm Commands
 
 ```bash
@@ -88,6 +141,7 @@ helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo update                # Refresh repo index
 helm uninstall dev-apache -n dev-apache   # Remove a release completely
 helm get values prd-apache -n prd-apache  # Show values for a running release
+helm status prd-apache -n prd-apache      # Show release status and notes
 ```
 
 ---
@@ -109,7 +163,9 @@ If the init container fails, Kubernetes retries it until it succeeds (or the pod
 | Purpose | Setup / preconditions | Application logic |
 | Failure behavior | Pod retried | Pod marked failed |
 
-### Example (`initcontainer.yaml`)
+### Example 1 — Create a Directory Before App Starts (`initcontainer.yaml`)
+
+This is the simplest case: the init container creates a folder that the main app needs.
 
 ```yaml
 apiVersion: v1
@@ -137,10 +193,44 @@ spec:
       emptyDir: {}
 ```
 
+### Example 2 — Wait for a Service to Be Ready (Real-World Pattern)
+
+This is the most common production use case: your app needs the database to be up before it starts. Without this, the app crashes on startup and Kubernetes spends time restarting it.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-with-db-wait
+spec:
+  initContainers:
+    - name: wait-for-mysql
+      image: busybox
+      # Keep trying to connect until MySQL responds — only then exit 0
+      command:
+        - sh
+        - -c
+        - |
+          until nslookup mysql-service; do
+            echo "Waiting for MySQL to be available..."
+            sleep 2
+          done
+          echo "MySQL is ready!"
+
+  containers:
+    - name: myapp
+      image: myapp:latest
+      env:
+        - name: DB_HOST
+          value: mysql-service
+```
+
+> **Why this works:** `nslookup mysql-service` succeeds only when the MySQL Service exists and has a DNS entry. The init container loops until that happens, so `myapp` never starts until MySQL is reachable.
+
 ```bash
 kubectl apply -f initcontainer.yaml
 
-# Watch pod lifecycle — you'll see Init:0/1 → Running
+# Watch pod lifecycle — you'll see Init:0/1 → Init:1/1 → Running
 kubectl get pods -w
 
 # Check init container logs
@@ -149,8 +239,6 @@ kubectl logs init-demo -c init-setup
 # Check main container logs
 kubectl logs init-demo -c main-app
 ```
-
-> **Common use case:** Wait for a database to be ready before starting the app server. Use `init-container` to poll the DB connection and only exit 0 when it's available.
 
 ---
 
@@ -164,14 +252,16 @@ Think of it as plugging in a log collector, a metrics exporter, or a proxy, with
 
 ### Common Sidecar Patterns
 
-| Pattern | Example |
-|---------|---------|
-| Log collection | Fluentd shipping logs to Elasticsearch |
-| Metrics export | Prometheus exporter alongside your app |
-| Proxy / mTLS | Envoy proxy (used by Istio service mesh) |
-| Config reload | Watcher that hot-reloads config on change |
+| Pattern | Example | Why Not in the Main App? |
+|---------|---------|--------------------------|
+| Log collection | Fluentd shipping logs to Elasticsearch | Log shipping logic clutters app code |
+| Metrics export | Prometheus exporter alongside your app | Metrics format shouldn't be your app's concern |
+| Proxy / mTLS | Envoy proxy (used by Istio service mesh) | Security layer belongs at infra level |
+| Config reload | Watcher that hot-reloads config on change | Separation of app logic from config management |
 
-### Example (`sidecar-container.yml`)
+### Example 1 — Log Shipping Sidecar (`sidecar-container.yml`)
+
+The main app writes logs to a shared volume. The sidecar reads and ships them — the app never needs to know where logs go.
 
 ```yaml
 apiVersion: v1
@@ -199,6 +289,43 @@ spec:
       emptyDir: {}
 ```
 
+### Example 2 — Nginx with a Metrics Exporter Sidecar
+
+A real-world pattern: Nginx doesn't natively expose Prometheus metrics, so a sidecar exporter scrapes Nginx's status page and converts it to Prometheus format.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-with-metrics
+  labels:
+    app: nginx
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.25
+      ports:
+        - containerPort: 80
+      # Nginx status page must be enabled for the exporter to scrape
+      volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+
+    - name: nginx-exporter          # Sidecar: converts nginx stats → Prometheus metrics
+      image: nginx/nginx-prometheus-exporter:latest
+      args:
+        - -nginx.scrape-uri=http://localhost/nginx_status
+      ports:
+        - containerPort: 9113       # Prometheus scrapes this port
+
+  volumes:
+    - name: nginx-config
+      configMap:
+        name: nginx-status-config
+```
+
+> **Why localhost works:** Both containers share the same network namespace inside the pod. The sidecar can reach Nginx on `localhost:80` without any service or IP address.
+
 ```bash
 kubectl apply -f sidecar-container.yml
 
@@ -217,7 +344,7 @@ kubectl logs sidecar-test -c sidecar-container
 ### The Problem at Scale
 
 With hundreds of microservices, you need:
-- **Traffic management** — route 10% of traffic to v2, 90% to v1
+- **Traffic management** — route 10% of traffic to v2, 90% to v1 (canary deployments)
 - **Observability** — which service called which, with what latency
 - **Security** — mutual TLS between every service automatically
 - **Resilience** — retries, timeouts, circuit breakers
@@ -251,6 +378,7 @@ mv istioctl /usr/local/bin
 istioctl install -f samples/bookinfo/demo-profile-no-gateways.yaml -y
 
 # Enable automatic sidecar injection for the default namespace
+# This label tells Istio to inject Envoy into every new pod in this namespace
 kubectl label namespace default istio-injection=enabled
 
 # Verify the label was applied
@@ -275,6 +403,9 @@ kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
 # Deploy — Istio auto-injects Envoy sidecar into each pod
 kubectl apply -f samples/bookinfo/platform/kube/bookinfo.yaml
 
+# Verify — each pod should show 2/2 READY (app + envoy sidecar)
+kubectl get pods
+
 # Verify the app works inside the cluster
 kubectl exec "$(kubectl get pod -l app=ratings -o jsonpath='{.items[0].metadata.name}')" \
   -c ratings -- curl -sS productpage:9080/productpage | grep -o "<title>.*</title>"
@@ -292,6 +423,57 @@ kubectl get gateway
 kubectl port-forward svc/bookinfo-gateway-istio 8080:80
 ```
 
+### Traffic Splitting with VirtualService (Canary Deployment)
+
+This is one of Istio's most powerful features. You can send a percentage of traffic to a new version without changing any application code or redeploying.
+
+```yaml
+# virtualservice.yaml — Route 90% to v1, 10% to v2
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: reviews
+spec:
+  hosts:
+    - reviews
+  http:
+    - route:
+        - destination:
+            host: reviews
+            subset: v1
+          weight: 90       # 90% of traffic goes to v1 (stable)
+        - destination:
+            host: reviews
+            subset: v2
+          weight: 10       # 10% goes to v2 (canary — testing new version)
+---
+# destinationrule.yaml — Define what v1 and v2 mean
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: reviews
+spec:
+  host: reviews
+  subsets:
+    - name: v1
+      labels:
+        version: v1       # Pods with label version=v1
+    - name: v2
+      labels:
+        version: v2       # Pods with label version=v2
+```
+
+```bash
+kubectl apply -f virtualservice.yaml
+kubectl apply -f destinationrule.yaml
+
+# To gradually shift more traffic to v2 (promote the canary):
+# Edit weight: v1=50, v2=50 → then v1=0, v2=100
+kubectl apply -f virtualservice.yaml
+```
+
+> **Why this is better than a standard K8s rollout:** With K8s rolling updates, traffic split is determined by replica count (5 old pods + 1 new = ~17% new). With Istio you get exact percentages regardless of replica count, plus you can roll back instantly by changing a number.
+
 ### Kiali Dashboard — Visualise the Service Mesh
 
 Kiali is Istio's observability UI — it shows a live graph of services, traffic flow, error rates, and latencies.
@@ -307,15 +489,25 @@ kubectl rollout status deployment/kiali -n istio-system
 istioctl dashboard kiali
 ```
 
+In Kiali you'll see:
+- A real-time service graph showing which service calls which
+- Request rates and error rates per edge
+- Response time percentiles
+- The VirtualService traffic weights visualised
+
 ---
 
 ## Quick Reference
 
 ```bash
 # Helm
+helm create <chart>                                   # Scaffold a new chart
+helm template <release> ./<chart>                     # Preview rendered YAML
+helm lint ./<chart>                                   # Check for errors
 helm install <release> <chart> -n <ns> --create-namespace
 helm upgrade <release> ./<chart> -n <ns>
 helm rollback <release> <revision> -n <ns>
+helm history <release> -n <ns>
 helm uninstall <release> -n <ns>
 
 # Init / Sidecar containers
@@ -325,6 +517,9 @@ kubectl logs <pod> -c <container-name>        # Logs from a specific container
 # Istio
 istioctl install -f <profile.yaml> -y
 kubectl label namespace <ns> istio-injection=enabled
+kubectl get pods                              # Check 2/2 READY = sidecar injected
 istioctl dashboard kiali
+kubectl get virtualservice
+kubectl get destinationrule
 kubectl get gateway
 ```

@@ -21,9 +21,12 @@ Once pods are running, they need to be accessible — either internally or exter
 | `LoadBalancer` | External via cloud LB | Production external access on cloud providers |
 | `ExternalName` | DNS alias | Pointing to an external service by name |
 
-### Creating a Service (`service.yml`)
+### Example 1 — ClusterIP (Internal Service)
+
+Use this when only other pods inside the cluster need to reach this service. The backend calling a database is a perfect example.
 
 ```yaml
+# service-clusterip.yml
 apiVersion: v1
 kind: Service
 metadata:
@@ -39,6 +42,39 @@ spec:
   type: ClusterIP
 ```
 
+### Example 2 — NodePort (External Access for Testing)
+
+NodePort exposes the service on a static port (30000–32767) on every node. You access it at `<any-node-ip>:<nodePort>`. Useful for local Kind/Minikube setups where there's no cloud load balancer.
+
+```yaml
+# service-nodeport.yml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-nodeport
+  namespace: nginx
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80           # ClusterIP port (internal)
+      targetPort: 80     # Pod port
+      nodePort: 30080    # External port on every node (must be 30000–32767)
+  type: NodePort
+```
+
+```bash
+# Access via any node IP:
+# http://<node-ip>:30080
+
+# On Minikube:
+minikube service nginx-nodeport -n nginx --url
+# Prints the full URL to open in your browser
+```
+
+> **When to use NodePort vs LoadBalancer:** NodePort is for local dev and testing — it works without a cloud provider. LoadBalancer is for production on AWS/GCP/Azure where the cloud creates a real load balancer with a public IP.
+
 ```bash
 kubectl apply -f service.yml
 ```
@@ -49,6 +85,10 @@ kubectl apply -f service.yml
 
 ```bash
 kubectl get all -n nginx
+
+# Check which pods a service is routing to:
+kubectl describe svc nginx-service -n nginx
+# Look at "Endpoints:" — these are the pod IPs currently selected
 ```
 
 ---
@@ -71,6 +111,8 @@ sudo -E kubectl port-forward service/nginx-service -n nginx 80:80 --address=0.0.
 > **Note:** If port 80 is already in use, try port 8080 or another free port: `8080:80`.
 
 After running this on EC2, open **port 80** (or whichever port you chose) in the EC2 Security Group **Inbound rules**, then visit `http://<your-ec2-ip>` in a browser.
+
+> **Port forwarding is not production-grade.** It's a development/debugging tool. For real external traffic, use NodePort, LoadBalancer, or Ingress.
 
 ---
 
@@ -104,7 +146,9 @@ kubectl get pods -n ingress-nginx
 
 > The controller creates its own namespace (`ingress-nginx`) and sets up a LoadBalancer/NodePort service automatically.
 
-### Creating an Ingress (`ingress.yml`)
+### Example 1 — Path-Based Routing (`ingress-path.yml`)
+
+Route traffic to different services based on the URL path — all on the same IP.
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -135,10 +179,94 @@ spec:
                   number: 80
 ```
 
+### Example 2 — Host-Based Routing (Multiple Domains)
+
+Route traffic to different services based on the domain name — cleaner for production where each app has its own subdomain.
+
+```yaml
+# ingress-host.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multi-host-ingress
+  namespace: production
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: api.myapp.com          # api.myapp.com → backend service
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 5000
+
+    - host: myapp.com              # myapp.com → frontend service
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+```
+
+> For local testing with host-based routing, add entries to `/etc/hosts`:
+> ```
+> <cluster-ip>  myapp.com
+> <cluster-ip>  api.myapp.com
+> ```
+
+### Example 3 — TLS / HTTPS Ingress
+
+In production you always want HTTPS. Create a TLS Secret and reference it in the Ingress.
+
+```bash
+# Generate a self-signed cert for local testing
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout tls.key -out tls.crt -subj "/CN=myapp.com"
+
+# Create the TLS Secret
+kubectl create secret tls myapp-tls --key tls.key --cert tls.crt -n production
+```
+
+```yaml
+# ingress-tls.yml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tls-ingress
+  namespace: production
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"   # Force HTTP → HTTPS
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - myapp.com
+      secretName: myapp-tls        # The Secret created above
+  rules:
+    - host: myapp.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+```
+
 ```bash
 kubectl apply -f ingress.yml
 
-# Check ingress status
+# Check ingress status — ADDRESS column shows the assigned IP/hostname
 kubectl get ing -n nginx
 ```
 
@@ -158,6 +286,8 @@ Without the `rewrite-target` annotation, your app receives `/nginx` as the path 
 |------------|---------|
 | `nginx.ingress.kubernetes.io/rewrite-target: /` | Rewrites the path to `/` before sending to the backend |
 | `nginx.ingress.kubernetes.io/ssl-redirect: "false"` | Disables automatic HTTP → HTTPS redirect |
+| `nginx.ingress.kubernetes.io/proxy-body-size: "10m"` | Increase max upload size (default is 1m) |
+| `nginx.ingress.kubernetes.io/rate-limit: "100"` | Rate limit requests per second |
 
 ---
 
@@ -217,6 +347,12 @@ spec:
           volumeMounts:
             - name: mysql-storage
               mountPath: /var/lib/mysql
+          # Health check — K8s won't send traffic until MySQL is ready
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "localhost"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
   volumeClaimTemplates:
     - metadata:
         name: mysql-storage
@@ -246,6 +382,8 @@ spec:
       targetPort: 3306
 ```
 
+> **Why headless for StatefulSets?** With a regular ClusterIP service, DNS resolves to the service IP and requests are load-balanced randomly across pods. With a headless service, DNS returns the actual pod IPs — so `mysql-0.mysql-headless` always resolves to pod `mysql-0` specifically. This is important for databases where you need to target the primary vs replica.
+
 ```bash
 kubectl apply -f service.yml
 kubectl apply -f statefulset.yml
@@ -264,6 +402,12 @@ kubectl exec -it mysql-0 -n mysql -- bash
 mysql -u root -p
 # Enter your password, then:
 show databases;
+
+# Verify persistence: delete the pod — same name recreated with same data
+kubectl delete pod mysql-0 -n mysql
+kubectl get pods -n mysql -w   # Watch mysql-0 come back
+kubectl exec -it mysql-0 -n mysql -- mysql -u root -p -e "show databases;"
+# Your databases are still there
 ```
 
 > **Behaviour:** Delete `mysql-0` and Kubernetes immediately recreates it with the same name, same PVC, and same data intact.
@@ -289,13 +433,17 @@ metadata:
 data:
   database-name: myappdb
   max-connections: "100"
+  app-config.properties: |
+    db.host=mysql-headless
+    db.port=3306
+    log.level=INFO
 ```
 
 ```bash
 kubectl apply -f configmap.yml
 ```
 
-### Using a ConfigMap in a Pod
+### Using a ConfigMap — As Environment Variables
 
 ```yaml
 env:
@@ -304,6 +452,29 @@ env:
       configMapKeyRef:
         name: mysql-config
         key: database-name
+
+# Or inject all keys as env vars at once:
+envFrom:
+  - configMapRef:
+      name: mysql-config
+```
+
+### Using a ConfigMap — As a Mounted File
+
+Useful when your app reads a config file at startup (e.g., `app.properties`, `nginx.conf`).
+
+```yaml
+volumeMounts:
+  - name: config-volume
+    mountPath: /etc/app          # ConfigMap keys become files here
+
+volumes:
+  - name: config-volume
+    configMap:
+      name: mysql-config
+      items:
+        - key: app-config.properties
+          path: app.properties   # Mounted as /etc/app/app.properties
 ```
 
 > **Tip:** To update a config value, edit the ConfigMap and re-apply it. Pods using `envFrom` need to be restarted to pick up the change; pods using volume mounts see updates automatically (after a short delay).
@@ -321,6 +492,10 @@ ConfigMap values are stored in plain text. For sensitive data — passwords, API
 ```bash
 echo -n "Nikunj112233" | base64
 # Output: TmlrdW5qMTEyMjMz
+
+# Decode to verify:
+echo "TmlrdW5qMTEyMjMz" | base64 -d
+# Output: Nikunj112233
 ```
 
 > Use `-n` to avoid encoding a trailing newline, which would make the decoded value wrong.
@@ -336,10 +511,18 @@ metadata:
 type: Opaque
 data:
   root-password: TmlrdW5qMTEyMjMz    # base64 encoded value
+  replication-password: cmVwbGljYXRpb24xMjM=
 ```
 
 ```bash
 kubectl apply -f secret.yml
+
+# View secret (values are base64 — not shown in plain text)
+kubectl get secret mysql-secret -n mysql -o yaml
+
+# Decode a specific value:
+kubectl get secret mysql-secret -n mysql \
+  -o jsonpath="{.data.root-password}" | base64 -d
 ```
 
 ### Using a Secret in a Pod
@@ -371,12 +554,18 @@ kubectl apply -f .
 # Get all resources in a namespace
 kubectl get all -n <namespace>
 
+# Check which pods a service selects (look at Endpoints:)
+kubectl describe svc <service-name> -n <namespace>
+
 # Describe a resource (useful for debugging)
 kubectl describe svc nginx-service -n nginx
 kubectl describe ingress nginx-ingress -n nginx
 
-# Get ingress details
+# Get ingress details (ADDRESS shows the assigned IP)
 kubectl get ing -n nginx
+
+# Minikube: open a NodePort service in browser
+minikube service <service-name> -n <namespace>
 
 # Watch pod status (refreshes every 2s)
 watch kubectl get pods -n mysql
@@ -386,4 +575,5 @@ kubectl exec -it <pod-name> -n <namespace> -- bash
 
 # Check logs
 kubectl logs <pod-name> -n <namespace>
+kubectl logs <pod-name> -n <namespace> --previous   # Logs from previous crash
 ```
