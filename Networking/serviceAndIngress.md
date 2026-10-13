@@ -21,6 +21,31 @@ Once pods are running, they need to be accessible — either internally or exter
 | `LoadBalancer` | External via cloud LB | Production external access on cloud providers |
 | `ExternalName` | DNS alias | Pointing to an external service by name |
 
+### Service YAML Fields Explained
+
+| Field | Value / Example | Description |
+|-------|----------------|-------------|
+| `apiVersion` | `v1` | Services are in the core API group |
+| `kind` | `Service` | Resource type |
+| `metadata.name` | `nginx-service` | DNS name used by other pods to reach this service |
+| `metadata.namespace` | `nginx` | Namespace the service lives in |
+| `spec.selector` | `app: nginx` | Label query — routes traffic to pods with this label |
+| `spec.ports[].port` | `80` | Port the **service** listens on (what callers connect to) |
+| `spec.ports[].targetPort` | `80` | Port the **pod container** listens on (where traffic is forwarded) |
+| `spec.ports[].nodePort` | `30080` | NodePort only — static port exposed on every node (30000–32767) |
+| `spec.ports[].protocol` | `TCP` | `TCP` (default), `UDP`, or `SCTP` |
+| `spec.type` | `ClusterIP` | Service type — controls how the service is exposed |
+
+### Port Fields Side by Side
+
+| Field | Who uses it | Example | Analogy |
+|-------|------------|---------|---------|
+| `port` | Other pods calling this service | `80` | The front door of the building |
+| `targetPort` | The container inside the pod | `8080` | The actual office inside the building |
+| `nodePort` | External users / browsers | `30080` | The building's street address |
+
+> `port` and `targetPort` can be different. E.g. the service listens on `80` but your Node.js app listens on `3000` — set `port: 80, targetPort: 3000`.
+
 ### Example 1 — ClusterIP (Internal Service)
 
 Use this when only other pods inside the cluster need to reach this service. The backend calling a database is a perfect example.
@@ -74,6 +99,17 @@ minikube service nginx-nodeport -n nginx --url
 ```
 
 > **When to use NodePort vs LoadBalancer:** NodePort is for local dev and testing — it works without a cloud provider. LoadBalancer is for production on AWS/GCP/Azure where the cloud creates a real load balancer with a public IP.
+
+### Service Type Decision Guide
+
+| Scenario | Use Type | Why |
+|----------|---------|-----|
+| Backend pod calling a database pod | `ClusterIP` | No external access needed — internal only |
+| Testing your app on Minikube/Kind | `NodePort` | No cloud LB available — access via node IP |
+| Production app on AWS/GCP/Azure | `LoadBalancer` | Gets a real public IP automatically |
+| Redirecting to an external URL/domain | `ExternalName` | DNS alias — no proxy, just CNAME |
+| Internal microservice-to-microservice | `ClusterIP` | Keeps traffic inside the cluster |
+| Database in a StatefulSet | `ClusterIP: None` (headless) | Direct pod DNS, no load balancing |
 
 ```bash
 kubectl apply -f service.yml
@@ -278,16 +314,41 @@ sudo -E kubectl port-forward service/ingress-nginx-controller -n ingress-nginx 8
 
 Then open port `8080` in the EC2 Security Group and visit `http://<ec2-ip>:8080/nginx` or `http://<ec2-ip>:8080/app`.
 
+### Ingress YAML Fields Explained
+
+| Field | Value / Example | Description |
+|-------|----------------|-------------|
+| `metadata.annotations` | `rewrite-target: /` | Controller-specific behaviour config (not part of K8s core spec) |
+| `spec.ingressClassName` | `nginx` | Which Ingress Controller handles this resource |
+| `spec.tls[].hosts` | `myapp.com` | Domains to apply TLS to |
+| `spec.tls[].secretName` | `myapp-tls` | K8s Secret holding the TLS cert and key |
+| `spec.rules[].host` | `api.myapp.com` | Domain to match (omit for any domain) |
+| `spec.rules[].http.paths[].path` | `/api` | URL path prefix to match |
+| `spec.rules[].http.paths[].pathType` | `Prefix` | How the path is matched — see table below |
+| `backend.service.name` | `backend-service` | Service to forward matched traffic to |
+| `backend.service.port.number` | `5000` | Service port to forward to |
+
+### Ingress `pathType` Values
+
+| pathType | Behaviour | Example |
+|----------|-----------|---------|
+| `Prefix` | Matches the path and anything under it | `/api` matches `/api`, `/api/users`, `/api/v2/orders` |
+| `Exact` | Matches only the exact path string | `/api` matches only `/api` — not `/api/users` |
+| `ImplementationSpecific` | Controller decides (often regex) | Used for nginx regex captures like `/api/(.*)` |
+
 ### Annotations Explained
 
 Without the `rewrite-target` annotation, your app receives `/nginx` as the path — most apps aren't expecting that prefix. The annotation strips it so the app only sees `/`.
 
-| Annotation | Purpose |
-|------------|---------|
-| `nginx.ingress.kubernetes.io/rewrite-target: /` | Rewrites the path to `/` before sending to the backend |
-| `nginx.ingress.kubernetes.io/ssl-redirect: "false"` | Disables automatic HTTP → HTTPS redirect |
-| `nginx.ingress.kubernetes.io/proxy-body-size: "10m"` | Increase max upload size (default is 1m) |
-| `nginx.ingress.kubernetes.io/rate-limit: "100"` | Rate limit requests per second |
+| Annotation | Value | Purpose |
+|------------|-------|---------|
+| `nginx.ingress.kubernetes.io/rewrite-target` | `/` | Rewrites the path before sending to the backend |
+| `nginx.ingress.kubernetes.io/ssl-redirect` | `"false"` | Disables automatic HTTP → HTTPS redirect |
+| `nginx.ingress.kubernetes.io/proxy-body-size` | `"10m"` | Increase max upload size (default 1m) |
+| `nginx.ingress.kubernetes.io/rate-limit` | `"100"` | Rate limit: max requests per second per IP |
+| `nginx.ingress.kubernetes.io/proxy-connect-timeout` | `"60"` | Seconds to wait when connecting to backend |
+| `nginx.ingress.kubernetes.io/proxy-read-timeout` | `"60"` | Seconds to wait for backend response |
+| `nginx.ingress.kubernetes.io/use-regex` | `"true"` | Enable regex in path matching |
 
 ---
 
@@ -299,8 +360,22 @@ Without the `rewrite-target` annotation, your app receives `/nginx` as the path 
 |---------|-----------|-------------|
 | Pod identity | Random names (`app-abc123`) | Stable, ordered names (`mysql-0`, `mysql-1`) |
 | Storage | Shared or ephemeral | Each pod gets its own persistent volume |
-| Scaling | Parallel | Ordered (one at a time) |
-| Use case | Stateless apps (Flask, Django) | Stateful apps (MySQL, MongoDB, Kafka) |
+| Scaling order | All pods start/stop in parallel | Ordered one at a time (`mysql-0` before `mysql-1`) |
+| DNS per pod | No — only service-level DNS | Yes — `mysql-0.mysql-headless.mysql.svc.cluster.local` |
+| Use case | Stateless apps (Flask, Django, Nginx) | Stateful apps (MySQL, MongoDB, Kafka, Zookeeper) |
+| Service needed | Regular ClusterIP service | Headless service (`clusterIP: None`) |
+| Pod restart behaviour | New pod gets a new name | Same name reused — `mysql-0` always comes back as `mysql-0` |
+
+### StatefulSet YAML Fields Explained
+
+| Field | Value / Example | Description |
+|-------|----------------|-------------|
+| `spec.serviceName` | `mysql-headless` | Name of the headless Service — must exist before StatefulSet |
+| `spec.replicas` | `1` | Number of pod replicas (each gets its own PVC) |
+| `spec.template` | — | Pod definition — same as Deployment (NOT `templates`) |
+| `spec.volumeClaimTemplates` | — | PVC template — K8s creates one PVC per replica automatically |
+| `volumeClaimTemplates[].accessModes` | `ReadWriteOnce` | Each PVC is exclusive to its pod |
+| `volumeClaimTemplates[].storage` | `1Gi` | Storage per replica |
 
 ### Why StatefulSets for Databases?
 
@@ -422,6 +497,23 @@ Hardcoding configuration values (database names, URLs, feature flags) inside you
 
 **ConfigMaps** let you store config data separately and inject it into pods as environment variables or mounted files.
 
+### ConfigMap Fields Explained
+
+| Field | Description |
+|-------|-------------|
+| `data` | Key-value pairs for plain text config |
+| `binaryData` | Key-value pairs for binary data (base64 encoded) |
+| `data.<key>` | A single config value (string) |
+| `data.<key>: \|` | A multiline value — entire file content as a single key |
+
+### ConfigMap Injection Methods
+
+| Method | YAML keyword | Best for | Reload on change? |
+|--------|-------------|---------|------------------|
+| Single env var | `configMapKeyRef` | Picking specific keys | No — pod restart needed |
+| All keys as env vars | `configMapRef` (via `envFrom`) | Injecting all config at once | No — pod restart needed |
+| Mounted as a file | `configMap` (via `volumes`) | Apps that read config files | Yes — auto-updated after ~1 min |
+
 ### Creating a ConfigMap (`configmap.yml`)
 
 ```yaml
@@ -483,6 +575,17 @@ volumes:
 
 ## 6. Secrets
 
+### ConfigMap vs Secret — When to Use Which
+
+| | ConfigMap | Secret |
+|-|-----------|--------|
+| **Storage** | Plain text in etcd | base64-encoded in etcd |
+| **Use for** | App config, feature flags, URLs, ports | Passwords, API keys, TLS certs, tokens |
+| **Readable by** | Anyone with `kubectl get cm` | Anyone with `kubectl get secret` (RBAC can restrict) |
+| **Auto-base64** | No | Yes — values must be base64 encoded |
+| **Volume mount** | Read-only files | Read-only files |
+| **Production security** | Safe | Use Vault / Sealed Secrets for true encryption |
+
 ### Why Not ConfigMaps for Passwords?
 
 ConfigMap values are stored in plain text. For sensitive data — passwords, API keys, tokens — use **Secrets**, which are base64-encoded and can be further protected with RBAC or external secret managers.
@@ -499,6 +602,17 @@ echo "TmlrdW5qMTEyMjMz" | base64 -d
 ```
 
 > Use `-n` to avoid encoding a trailing newline, which would make the decoded value wrong.
+
+### Secret Types
+
+| `type` | Use for | Example |
+|--------|---------|---------|
+| `Opaque` | Generic key-value secrets (passwords, tokens) | DB passwords, API keys |
+| `kubernetes.io/tls` | TLS certificates | Ingress HTTPS cert + key |
+| `kubernetes.io/dockerconfigjson` | Private Docker registry credentials | Pulling images from private repos |
+| `kubernetes.io/service-account-token` | Auto-mounted SA token | Pod → K8s API authentication |
+| `kubernetes.io/basic-auth` | HTTP basic auth username + password | Legacy auth systems |
+| `kubernetes.io/ssh-auth` | SSH private key | Git SSH deployments |
 
 ### Creating a Secret (`secret.yml`)
 
@@ -542,6 +656,45 @@ kubectl apply -f statefulset.yml
 ```
 
 > **Important:** base64 is encoding, not encryption. Anyone with access to the cluster can decode Secrets. For production, use tools like **HashiCorp Vault**, **AWS Secrets Manager**, or Kubernetes **Sealed Secrets** to truly encrypt sensitive values.
+
+---
+
+## 7. Kubernetes DNS — How Services Find Each Other
+
+Every Service automatically gets a DNS name inside the cluster. Pods use this name instead of IP addresses.
+
+### DNS Name Format
+
+```
+<service-name>.<namespace>.svc.cluster.local
+```
+
+| Short form | Full form | Works from |
+|-----------|-----------|-----------|
+| `mysql-service` | `mysql-service.mysql.svc.cluster.local` | Same namespace only |
+| `mysql-service.mysql` | `mysql-service.mysql.svc.cluster.local` | Any namespace |
+| `mysql-service.mysql.svc.cluster.local` | (same) | Any namespace |
+
+### DNS Examples by Resource Type
+
+| Resource | DNS Name | Example |
+|----------|---------|---------|
+| Service (ClusterIP) | `<name>.<ns>.svc.cluster.local` | `backend-service.production.svc.cluster.local` |
+| Headless Service pod | `<pod>.<svc>.<ns>.svc.cluster.local` | `mysql-0.mysql-headless.mysql.svc.cluster.local` |
+| StatefulSet pod 0 | `<name>-0.<svc>.<ns>.svc.cluster.local` | `mysql-0.mysql-headless.mysql.svc.cluster.local` |
+| StatefulSet pod 1 | `<name>-1.<svc>.<ns>.svc.cluster.local` | `mysql-1.mysql-headless.mysql.svc.cluster.local` |
+
+### Verify DNS Resolution Inside a Pod
+
+```bash
+# Run a debug pod and test DNS
+kubectl run dns-test --image=busybox --rm -it -- sh
+
+# Inside the pod:
+nslookup mysql-service.mysql          # Resolves to ClusterIP
+nslookup mysql-0.mysql-headless.mysql # Resolves to pod-0 IP directly (headless)
+wget -qO- http://nginx-service.nginx  # Test HTTP connectivity
+```
 
 ---
 
