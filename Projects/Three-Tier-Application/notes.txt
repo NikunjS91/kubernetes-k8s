@@ -1,0 +1,29 @@
+this is an three tier application we will talk you through the architecture and then we can tell in detail what and how to setup evertything
+
+here we have front end as react, then backend as nodejs and mongodb the database. (application layer),(logical layer) and (database layer)
+this calls up to three-tier application.
+
+first after these three comes the docker.
+    meaning the we will create container for each layer so we need to write docker file which will help us generating the image then that image will be then send to ECR(elactic container registery).
+    then for there we will setup the clusters using eks or kind (kubernetes) with the help of services these layer will be able to talk to each other, and we will have ingrees to say that if we say the route /frontend to see the frontend and /backend to see the backend.
+
+setup a ec2 and ssh into it.
+pull the code from the github then create out docker file (base image-> copy package*.json -> npm install -> copy code * )
+install docker in ec2.
+    : add owner to the docker.sock(using full path and sudo , $user)
+    : docker img build.
+    : open the ec2 security groups
+    : docker kill 
+
+push the docker image to ECR:
+    : need aws cli installed
+    : create user with adminaccess in aws IAM and access keys.
+    : Create ECR repo and Login into ECR
+        :build docker image
+        :Tag Image
+        :Docker Push
+
+install kubectl and then eksctl:
+    : setup eks cluster
+    : bind cluster (kubectl + EKS)(set context to perticular cluster only)
+    : write deployments(first MongoDB),secret(base64),service(all backend ,frontend and Mongodb)
