@@ -27,3 +27,16 @@ install kubectl and then eksctl:
     : setup eks cluster
     : bind cluster (kubectl + EKS)(set context to perticular cluster only)
     : write deployments(first MongoDB),secret(base64),service(all backend ,frontend and Mongodb)
+
+install helm for ingress:
+    : intall package manager
+    : ABL(Application load balancer)
+    : download IAM policy for loadbalancer and create
+    : eksctl utils add(TO ATTACH policies to eks)
+    : eksctl create service account with configure
+
+deploy alb in aws cluster inside kubectl:
+    : install helm,repo's,update,
+    : install aws-load-balancer(service accoticated to k8s(eks whole cluster))
+    : setup ingress for routing.
+    : done
