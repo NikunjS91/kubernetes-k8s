@@ -474,6 +474,112 @@ kubectl get all -n three-tier
 
 ---
 
+## Part 5 — ALB Ingress Controller (AWS Load Balancer)
+
+For EKS, use the **AWS Load Balancer Controller** instead of nginx — it provisions an actual AWS Application Load Balancer (ALB) per Ingress resource.
+
+### Step 1 — Install Helm
+
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version
+```
+
+### Step 2 — Download & Create IAM Policy
+
+```bash
+curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+
+aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam_policy.json
+```
+
+### Step 3 — Associate OIDC Provider with EKS
+
+```bash
+# Required so EKS pods can assume IAM roles
+eksctl utils associate-iam-oidc-provider \
+  --cluster three-tier-cluster \
+  --approve
+```
+
+### Step 4 — Create IAM Service Account
+
+```bash
+eksctl create iamserviceaccount \
+  --cluster three-tier-cluster \
+  --namespace kube-system \
+  --name aws-load-balancer-controller \
+  --attach-policy-arn arn:aws:iam::<account-id>:policy/AWSLoadBalancerControllerIAMPolicy \
+  --override-existing-serviceaccounts \
+  --approve
+```
+
+| Concept | Purpose |
+|---------|---------|
+| OIDC Provider | Allows EKS pods to authenticate with AWS IAM |
+| IAM Service Account | Links a K8s ServiceAccount to an IAM Role |
+| IAM Policy | Grants the controller permission to manage ALBs, target groups, etc. |
+
+### Step 5 — Deploy the Controller via Helm
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=three-tier-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller
+
+# Verify the controller is running
+kubectl get deployment -n kube-system aws-load-balancer-controller
+```
+
+### Step 6 — Update Ingress to Use ALB
+
+```yaml
+# ingress.yml (ALB version)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: three-tier-ingress
+  namespace: three-tier
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 5000
+```
+
+```bash
+kubectl apply -f ingress.yml
+
+# ALB takes ~2 min to provision — watch for the ADDRESS to appear
+kubectl get ingress -n three-tier --watch
+```
+
+---
+
 ## Troubleshooting
 
 | Problem | Command | What to look for |
