@@ -1,42 +1,103 @@
-this is an three tier application we will talk you through the architecture and then we can tell in detail what and how to setup evertything
+Three-Tier Application — AWS EKS Deployment
+============================================
 
-here we have front end as react, then backend as nodejs and mongodb the database. (application layer),(logical layer) and (database layer)
-this calls up to three-tier application.
+Architecture
+------------
+- Frontend  : React          (Application Layer)
+- Backend   : Node.js        (Logic Layer)
+- Database  : MongoDB        (Data Layer)
 
-first after these three comes the docker.
-    meaning the we will create container for each layer so we need to write docker file which will help us generating the image then that image will be then send to ECR(elactic container registery).
-    then for there we will setup the clusters using eks or kind (kubernetes) with the help of services these layer will be able to talk to each other, and we will have ingrees to say that if we say the route /frontend to see the frontend and /backend to see the backend.
+Each layer runs in its own Docker container.
+Images are pushed to AWS ECR → deployed on AWS EKS → routed via ALB Ingress.
 
-setup a ec2 and ssh into it.
-pull the code from the github then create out docker file (base image-> copy package*.json -> npm install -> copy code * )
-install docker in ec2.
-    : add owner to the docker.sock(using full path and sudo , $user)
-    : docker img build.
-    : open the ec2 security groups
-    : docker kill 
+Flow: Browser → ALB → Ingress → Service → Pod
+      Frontend never talks directly to MongoDB; all DB access goes through the backend.
 
-push the docker image to ECR:
-    : need aws cli installed
-    : create user with adminaccess in aws IAM and access keys.
-    : Create ECR repo and Login into ECR
-        :build docker image
-        :Tag Image
-        :Docker Push
 
-install kubectl and then eksctl:
-    : setup eks cluster
-    : bind cluster (kubectl + EKS)(set context to perticular cluster only)
-    : write deployments(first MongoDB),secret(base64),service(all backend ,frontend and Mongodb)
+Step 1 — EC2 Setup & Docker Build
+----------------------------------
+1. Launch EC2, SSH into it.
+2. Pull source code from GitHub.
+3. Install Docker on EC2.
+4. Add user to docker group:
+      sudo usermod -aG docker $USER
+      sudo chmod 666 /var/run/docker.sock
+5. Write Dockerfile for each service:
+      base image → COPY package*.json → RUN npm install → COPY source code
+6. Build images:
+      docker build -t <image-name> .
+7. Open required ports in EC2 Security Group.
+8. Test locally, then kill container:
+      docker kill <container-id>
 
-install helm for ingress:
-    : intall package manager
-    : ABL(Application load balancer)
-    : download IAM policy for loadbalancer and create
-    : eksctl utils add(TO ATTACH policies to eks)
-    : eksctl create service account with configure
 
-deploy alb in aws cluster inside kubectl:
-    : install helm,repo's,update,
-    : install aws-load-balancer(service accoticated to k8s(eks whole cluster))
-    : setup ingress for routing.
-    : done
+Step 2 — Push Docker Images to AWS ECR
+----------------------------------------
+1. Install AWS CLI on EC2.
+2. Create IAM user with AdministratorAccess → generate access keys.
+3. Configure CLI:
+      aws configure
+4. Create one ECR repository per service (frontend, backend).
+5. Authenticate Docker with ECR:
+      aws ecr get-login-password --region <region> | \
+        docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
+6. Tag and push images:
+      docker tag <image>:latest <ecr-uri>/<repo>:latest
+      docker push <ecr-uri>/<repo>:latest
+
+
+Step 3 — Kubernetes Cluster Setup (EKS)
+-----------------------------------------
+1. Install kubectl.
+2. Install eksctl.
+3. Create EKS cluster:
+      eksctl create cluster --name <cluster-name> --region <region> --nodes 2
+4. Bind kubectl to the EKS cluster (set context):
+      aws eks update-kubeconfig --region <region> --name <cluster-name>
+5. Verify:
+      kubectl get nodes
+
+
+Step 4 — Deploy Kubernetes Manifests
+--------------------------------------
+Deploy in this order:
+  1. Secret          — MongoDB credentials (base64 encoded)
+  2. MongoDB         — Deployment + ClusterIP Service
+  3. Backend         — Deployment + ClusterIP Service
+  4. Frontend        — Deployment + ClusterIP Service
+  5. Ingress         — Path-based routing (/frontend, /backend)
+
+Commands:
+  kubectl create namespace three-tier
+  kubectl apply -f secret.yml
+  kubectl apply -f mongodb-deployment.yml
+  kubectl apply -f backend-deployment.yml
+  kubectl apply -f frontend-deployment.yml
+  kubectl apply -f ingress.yml
+  kubectl get all -n three-tier
+
+
+Step 5 — ALB Ingress Controller (Helm)
+----------------------------------------
+1. Install Helm.
+2. Download IAM policy for the AWS Load Balancer Controller:
+      curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+      aws iam create-policy --policy-name AWSLoadBalancerControllerIAMPolicy \
+        --policy-document file://iam_policy.json
+3. Associate OIDC provider with EKS:
+      eksctl utils associate-iam-oidc-provider --cluster <cluster-name> --approve
+4. Create IAM service account and attach policy:
+      eksctl create iamserviceaccount \
+        --cluster <cluster-name> \
+        --namespace kube-system \
+        --name aws-load-balancer-controller \
+        --attach-policy-arn arn:aws:iam::<account-id>:policy/AWSLoadBalancerControllerIAMPolicy \
+        --approve
+5. Install controller via Helm:
+      helm repo add eks https://aws.github.io/eks-charts && helm repo update
+      helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+        -n kube-system \
+        --set clusterName=<cluster-name> \
+        --set serviceAccount.create=false \
+        --set serviceAccount.name=aws-load-balancer-controller
+6. Apply Ingress manifest with ALB annotations → done.
